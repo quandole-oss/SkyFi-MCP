@@ -20,7 +20,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-packages --dev
+        run: uv sync --all-packages --extra dev
         working-directory: .
 
       - name: Lint with ruff
@@ -42,7 +42,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-packages --dev
+        run: uv sync --all-packages --extra dev
         working-directory: .
 
       - name: Run tests
@@ -62,7 +62,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: packages/server/remote/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

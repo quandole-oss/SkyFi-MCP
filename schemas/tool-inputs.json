@@ -1,0 +1,490 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://skyfi.com/mcp/schemas/tool-inputs.json",
+  "title": "SkyFi MCP Server – Tool Input Schemas",
+  "description": "JSON Schema definitions for every tool input accepted by the SkyFi MCP server.",
+  "type": "object",
+  "$defs": {
+    "SensorType": {
+      "type": "string",
+      "enum": ["optical", "sar", "multispectral", "hyperspectral"],
+      "description": "Sensor modality used to capture the imagery."
+    },
+    "OrderStatus": {
+      "type": "string",
+      "enum": ["pending", "confirmed", "processing", "delivered", "cancelled", "failed"],
+      "description": "Current lifecycle status of an order."
+    },
+    "POICategory": {
+      "type": "string",
+      "enum": [
+        "airport",
+        "port",
+        "military",
+        "industrial",
+        "commercial",
+        "residential",
+        "natural",
+        "water",
+        "transportation"
+      ],
+      "description": "Point-of-interest category used for spatial search."
+    },
+    "GeoJSONGeometry": {
+      "type": "object",
+      "description": "A GeoJSON Geometry object (RFC 7946).",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "Point",
+            "MultiPoint",
+            "LineString",
+            "MultiLineString",
+            "Polygon",
+            "MultiPolygon",
+            "GeometryCollection"
+          ]
+        },
+        "coordinates": {
+          "description": "Coordinate array whose structure depends on the geometry type."
+        }
+      },
+      "additionalProperties": false
+    },
+    "LocationInput": {
+      "description": "A location expressed as either a GeoJSON geometry or a human-readable address string.",
+      "oneOf": [
+        { "$ref": "#/$defs/GeoJSONGeometry" },
+        {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text address or place name that will be geocoded server-side."
+        }
+      ]
+    },
+    "DateRange": {
+      "type": "object",
+      "description": "An inclusive date/time range.",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the range (ISO 8601)."
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the range (ISO 8601)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeliveryOptions": {
+      "type": "object",
+      "description": "Options controlling how imagery is delivered.",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["geotiff", "nitf", "jpeg2000", "png", "cog"],
+          "description": "Desired output file format."
+        },
+        "projection": {
+          "type": "string",
+          "description": "Target coordinate reference system (e.g. \"EPSG:4326\")."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+
+    "search_archive": {
+      "type": "object",
+      "description": "Search the SkyFi archive catalogue for imagery matching spatial, temporal, and sensor criteria.",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Area of interest as GeoJSON geometry or address string."
+        },
+        "date_range": {
+          "$ref": "#/$defs/DateRange",
+          "description": "Temporal window to constrain capture dates."
+        },
+        "resolution_min": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Minimum spatial resolution in metres per pixel."
+        },
+        "sensor_type": {
+          "$ref": "#/$defs/SensorType",
+          "description": "Filter results to a specific sensor modality."
+        },
+        "cloud_cover_max": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Maximum acceptable cloud cover percentage (0–100)."
+        },
+        "open_data": {
+          "type": "boolean",
+          "description": "When true, restrict results to openly licensed data."
+        },
+        "page_token": {
+          "type": "string",
+          "description": "Opaque cursor returned by a previous search for pagination."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_archive_details": {
+      "type": "object",
+      "description": "Retrieve full metadata for a single archive image.",
+      "required": ["archive_id"],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Unique identifier of the archive image."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "explore_providers": {
+      "type": "object",
+      "description": "List satellite imagery providers, optionally filtered by location or sensor type.",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Optional location to filter providers with coverage in that area."
+        },
+        "sensor_type": {
+          "$ref": "#/$defs/SensorType",
+          "description": "Optional sensor modality filter."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "estimate_archive_price": {
+      "type": "object",
+      "description": "Get a price estimate for purchasing an archive image.",
+      "required": ["archive_id"],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Unique identifier of the archive image to price."
+        },
+        "delivery_options": {
+          "$ref": "#/$defs/DeliveryOptions",
+          "description": "Desired delivery format and projection."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_tasking_quote": {
+      "type": "object",
+      "description": "Request a quote for a new satellite tasking (future capture) over a given area.",
+      "required": ["location", "resolution"],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Area of interest for the tasking request."
+        },
+        "resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Desired spatial resolution in metres per pixel."
+        },
+        "sensor_type": {
+          "$ref": "#/$defs/SensorType",
+          "description": "Preferred sensor modality."
+        },
+        "time_window": {
+          "$ref": "#/$defs/DateRange",
+          "description": "Acceptable capture window."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "analyze_feasibility": {
+      "type": "object",
+      "description": "Analyze the feasibility of capturing imagery at a given location within a time window.",
+      "required": ["location"],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Area of interest."
+        },
+        "time_window": {
+          "$ref": "#/$defs/DateRange",
+          "description": "Desired capture window."
+        },
+        "resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Target spatial resolution in metres per pixel."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "compare_pricing": {
+      "type": "object",
+      "description": "Compare imagery pricing across providers and resolution tiers for a given location.",
+      "required": ["location", "resolution_options"],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Area of interest."
+        },
+        "resolution_options": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minItems": 1,
+          "description": "List of resolution values (metres per pixel) to compare."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "place_archive_order": {
+      "type": "object",
+      "description": "Place (or preview) an order for an archive image. Set confirmed=true to execute the purchase.",
+      "required": ["archive_id"],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Unique identifier of the archive image to order."
+        },
+        "delivery_options": {
+          "$ref": "#/$defs/DeliveryOptions",
+          "description": "Desired delivery format and projection."
+        },
+        "confirmed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Must be true to execute the order. When false (default) returns a preview only."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "place_tasking_order": {
+      "type": "object",
+      "description": "Place (or preview) a tasking order from a previously obtained quote.",
+      "required": ["quote_id"],
+      "properties": {
+        "quote_id": {
+          "type": "string",
+          "description": "Identifier of the tasking quote to convert into an order."
+        },
+        "confirmed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Must be true to execute the order. When false (default) returns a preview only."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_order_status": {
+      "type": "object",
+      "description": "Retrieve the current status and metadata of an order.",
+      "required": ["order_id"],
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "Unique order identifier."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "list_orders": {
+      "type": "object",
+      "description": "List orders, optionally filtered by status and/or date range.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/OrderStatus",
+          "description": "Filter orders by lifecycle status."
+        },
+        "date_range": {
+          "$ref": "#/$defs/DateRange",
+          "description": "Filter orders by creation date."
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Page number for paginated results."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_order_images": {
+      "type": "object",
+      "description": "Retrieve download URLs for imagery delivered as part of an order.",
+      "required": ["order_id"],
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "Unique order identifier."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "setup_aoi_monitoring": {
+      "type": "object",
+      "description": "Create a persistent monitor that watches for new imagery over an area of interest.",
+      "required": ["location"],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Area of interest to monitor."
+        },
+        "resolution_min": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Minimum acceptable resolution in metres per pixel."
+        },
+        "notification_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Webhook URL to receive notifications when new imagery is available."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "list_monitors": {
+      "type": "object",
+      "description": "List all active area-of-interest monitors.",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "delete_monitor": {
+      "type": "object",
+      "description": "Delete an area-of-interest monitor.",
+      "required": ["monitor_id"],
+      "properties": {
+        "monitor_id": {
+          "type": "string",
+          "description": "Unique identifier of the monitor to delete."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_webhook_status": {
+      "type": "object",
+      "description": "Check the delivery status and health of a webhook subscription.",
+      "required": ["subscription_id"],
+      "properties": {
+        "subscription_id": {
+          "type": "string",
+          "description": "Unique identifier of the webhook subscription."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "check_notifications": {
+      "type": "object",
+      "description": "Retrieve pending/unread notifications for the authenticated user.",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "geocode": {
+      "type": "object",
+      "description": "Convert a free-text address or place name into geographic coordinates.",
+      "required": ["query"],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Address, place name, or landmark to geocode."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "reverse_geocode": {
+      "type": "object",
+      "description": "Convert geographic coordinates into a human-readable address.",
+      "required": ["lat", "lon"],
+      "properties": {
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "Latitude in decimal degrees (WGS 84)."
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "Longitude in decimal degrees (WGS 84)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "search_pois": {
+      "type": "object",
+      "description": "Search for points of interest near a location.",
+      "required": ["location"],
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/LocationInput",
+          "description": "Centre point or area for the POI search."
+        },
+        "category": {
+          "$ref": "#/$defs/POICategory",
+          "description": "Filter results to a specific POI category."
+        },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50000,
+          "default": 1000,
+          "description": "Search radius in metres (max 50 000)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_area_boundary": {
+      "type": "object",
+      "description": "Retrieve the administrative boundary polygon for a named area.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the administrative area (city, county, state, country, etc.)."
+        },
+        "admin_level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 11,
+          "description": "OSM admin_level to disambiguate results (1 = supranational, 11 = neighbourhood)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-lint-typecheck:
+    name: Python Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-packages --dev
+        working-directory: .
+
+      - name: Lint with ruff
+        run: uv run ruff check packages/core/
+
+      - name: Type check with mypy
+        run: uv run mypy packages/core/skyfi_mcp/ interfaces.py --strict
+
+  python-test:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-packages --dev
+        working-directory: .
+
+      - name: Run tests
+        run: uv run pytest packages/core/tests/ -v --tb=short
+
+  typescript-lint-typecheck:
+    name: TypeScript Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: packages/server/remote/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: packages/server/remote
+
+      - name: Type check
+        run: pnpm typecheck
+        working-directory: packages/server/remote

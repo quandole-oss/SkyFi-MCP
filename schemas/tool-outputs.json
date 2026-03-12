@@ -1,0 +1,1165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://skyfi.com/mcp/schemas/tool-outputs.json",
+  "title": "SkyFi MCP Server – Tool Output Schemas",
+  "description": "JSON Schema definitions for every tool output returned by the SkyFi MCP server.",
+  "type": "object",
+  "$defs": {
+    "SensorType": {
+      "type": "string",
+      "enum": ["optical", "sar", "multispectral", "hyperspectral"],
+      "description": "Sensor modality used to capture the imagery."
+    },
+    "OrderStatus": {
+      "type": "string",
+      "enum": ["pending", "confirmed", "processing", "delivered", "cancelled", "failed"],
+      "description": "Current lifecycle status of an order."
+    },
+    "GeoJSONGeometry": {
+      "type": "object",
+      "description": "A GeoJSON Geometry object (RFC 7946).",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "Point",
+            "MultiPoint",
+            "LineString",
+            "MultiLineString",
+            "Polygon",
+            "MultiPolygon",
+            "GeometryCollection"
+          ]
+        },
+        "coordinates": {
+          "description": "Coordinate array whose structure depends on the geometry type."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PriceBreakdown": {
+      "type": "object",
+      "description": "Itemised price breakdown for an order or estimate.",
+      "required": ["subtotal", "processing_fee", "total", "currency"],
+      "properties": {
+        "subtotal": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Base price before fees."
+        },
+        "processing_fee": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Processing / service fee."
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total amount payable."
+        },
+        "currency": {
+          "type": "string",
+          "description": "ISO 4217 currency code (e.g. \"USD\")."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PaginationInfo": {
+      "type": "object",
+      "description": "Cursor / offset pagination metadata.",
+      "required": ["has_more", "total_count"],
+      "properties": {
+        "has_more": {
+          "type": "boolean",
+          "description": "True when additional pages are available."
+        },
+        "next_offset": {
+          "type": ["string", "null"],
+          "description": "Opaque cursor to pass as page_token for the next page. Null when no more pages."
+        },
+        "total_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of results across all pages."
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeliveryOptions": {
+      "type": "object",
+      "description": "Delivery format and projection applied to the imagery.",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["geotiff", "nitf", "jpeg2000", "png", "cog"],
+          "description": "Output file format."
+        },
+        "projection": {
+          "type": "string",
+          "description": "Coordinate reference system (e.g. \"EPSG:4326\")."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ArchiveResult": {
+      "type": "object",
+      "description": "Summary of a single archive image returned by a catalogue search.",
+      "required": [
+        "archive_id",
+        "provider",
+        "sensor_type",
+        "resolution",
+        "capture_date",
+        "cloud_cover",
+        "geometry",
+        "thumbnail_url",
+        "open_data"
+      ],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Unique identifier for this archive image."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Name of the imagery provider."
+        },
+        "sensor_type": {
+          "$ref": "#/$defs/SensorType"
+        },
+        "resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Spatial resolution in metres per pixel."
+        },
+        "capture_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date/time the image was captured (ISO 8601)."
+        },
+        "cloud_cover": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Cloud cover percentage (0–100)."
+        },
+        "geometry": {
+          "$ref": "#/$defs/GeoJSONGeometry",
+          "description": "Footprint of the image."
+        },
+        "thumbnail_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of a thumbnail preview."
+        },
+        "open_data": {
+          "type": "boolean",
+          "description": "True if the image is available under an open licence."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProviderInfo": {
+      "type": "object",
+      "description": "Summary information about a satellite imagery provider.",
+      "required": [
+        "provider_id",
+        "name",
+        "sensor_types",
+        "resolution_range",
+        "coverage_description"
+      ],
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "description": "Unique identifier for the provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable provider name."
+        },
+        "sensor_types": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SensorType" },
+          "description": "Sensor modalities offered by this provider."
+        },
+        "resolution_range": {
+          "type": "object",
+          "required": ["min", "max"],
+          "properties": {
+            "min": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Best (finest) resolution in metres per pixel."
+            },
+            "max": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Coarsest resolution in metres per pixel."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Range of spatial resolutions available."
+        },
+        "coverage_description": {
+          "type": "string",
+          "description": "Human-readable description of geographic coverage."
+        }
+      },
+      "additionalProperties": false
+    },
+    "MonitorInfo": {
+      "type": "object",
+      "description": "Metadata for an area-of-interest monitor.",
+      "required": ["monitor_id", "location", "created_at", "status"],
+      "properties": {
+        "monitor_id": {
+          "type": "string",
+          "description": "Unique identifier for the monitor."
+        },
+        "location": {
+          "$ref": "#/$defs/GeoJSONGeometry",
+          "description": "Monitored area geometry."
+        },
+        "resolution_min": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "description": "Minimum resolution filter applied to this monitor, or null if unset."
+        },
+        "notification_url": {
+          "type": ["string", "null"],
+          "format": "uri",
+          "description": "Webhook URL receiving notifications, or null if unset."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the monitor was created (ISO 8601)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "paused", "error"],
+          "description": "Current operational status of the monitor."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Notification": {
+      "type": "object",
+      "description": "A single notification record.",
+      "required": ["notification_id", "type", "monitor_id", "payload", "created_at"],
+      "properties": {
+        "notification_id": {
+          "type": "string",
+          "description": "Unique notification identifier."
+        },
+        "type": {
+          "type": "string",
+          "description": "Notification type (e.g. \"new_imagery\", \"order_update\")."
+        },
+        "monitor_id": {
+          "type": "string",
+          "description": "Identifier of the monitor that triggered this notification."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Notification-type-specific payload data.",
+          "additionalProperties": true
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the notification was created (ISO 8601)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "OrderSummary": {
+      "type": "object",
+      "description": "Compact order record used in listings.",
+      "required": ["order_id", "order_type", "status", "created_at", "price"],
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "Unique order identifier."
+        },
+        "order_type": {
+          "type": "string",
+          "enum": ["archive", "tasking"],
+          "description": "Whether this is an archive purchase or a tasking order."
+        },
+        "status": {
+          "$ref": "#/$defs/OrderStatus"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the order was created (ISO 8601)."
+        },
+        "price": {
+          "$ref": "#/$defs/PriceBreakdown"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+
+    "search_archive": {
+      "type": "object",
+      "description": "Paginated list of archive images matching the search criteria.",
+      "required": ["results", "pagination"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ArchiveResult" },
+          "description": "Matching archive images for the current page."
+        },
+        "pagination": {
+          "$ref": "#/$defs/PaginationInfo"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_archive_details": {
+      "type": "object",
+      "description": "Full metadata for a single archive image.",
+      "required": [
+        "archive_id",
+        "provider",
+        "sensor_type",
+        "resolution",
+        "capture_date",
+        "cloud_cover",
+        "geometry",
+        "thumbnail_url",
+        "open_data",
+        "bands",
+        "file_size_mb",
+        "license",
+        "metadata"
+      ],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Unique identifier for the archive image."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Name of the imagery provider."
+        },
+        "sensor_type": {
+          "$ref": "#/$defs/SensorType"
+        },
+        "resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Spatial resolution in metres per pixel."
+        },
+        "capture_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date/time the image was captured (ISO 8601)."
+        },
+        "cloud_cover": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Cloud cover percentage (0–100)."
+        },
+        "geometry": {
+          "$ref": "#/$defs/GeoJSONGeometry",
+          "description": "Footprint of the image."
+        },
+        "thumbnail_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of a thumbnail preview."
+        },
+        "open_data": {
+          "type": "boolean",
+          "description": "True if the image is available under an open licence."
+        },
+        "bands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of spectral band names available in the image (e.g. [\"red\", \"green\", \"blue\", \"nir\"])."
+        },
+        "file_size_mb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "File size of the image in megabytes."
+        },
+        "license": {
+          "type": "string",
+          "description": "Licence under which the imagery may be used."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Provider-specific metadata key-value pairs.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "explore_providers": {
+      "type": "object",
+      "description": "List of satellite imagery providers matching the filter criteria.",
+      "required": ["providers"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProviderInfo" },
+          "description": "Matching providers."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "estimate_archive_price": {
+      "type": "object",
+      "description": "Price estimate for purchasing an archive image.",
+      "required": ["archive_id", "price", "delivery_options", "estimated_delivery_time"],
+      "properties": {
+        "archive_id": {
+          "type": "string",
+          "description": "Identifier of the priced archive image."
+        },
+        "price": {
+          "$ref": "#/$defs/PriceBreakdown"
+        },
+        "delivery_options": {
+          "$ref": "#/$defs/DeliveryOptions",
+          "description": "Delivery format and projection that will be applied."
+        },
+        "estimated_delivery_time": {
+          "type": "string",
+          "description": "Human-readable estimated delivery time (e.g. \"2 hours\", \"1 business day\")."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_tasking_quote": {
+      "type": "object",
+      "description": "Quote for a satellite tasking request.",
+      "required": [
+        "quote_id",
+        "price",
+        "feasibility_score",
+        "estimated_capture_window",
+        "provider",
+        "resolution",
+        "expires_at"
+      ],
+      "properties": {
+        "quote_id": {
+          "type": "string",
+          "description": "Unique identifier for this quote. Use with place_tasking_order to execute."
+        },
+        "price": {
+          "$ref": "#/$defs/PriceBreakdown"
+        },
+        "feasibility_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Probability-like score (0–1) indicating likelihood of successful capture."
+        },
+        "estimated_capture_window": {
+          "type": "object",
+          "required": ["start", "end"],
+          "properties": {
+            "start": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Earliest expected capture time (ISO 8601)."
+            },
+            "end": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Latest expected capture time (ISO 8601)."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Estimated window during which the capture will occur."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider that will perform the tasking."
+        },
+        "resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Spatial resolution in metres per pixel."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp after which this quote is no longer valid (ISO 8601)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "analyze_feasibility": {
+      "type": "object",
+      "description": "Feasibility analysis for capturing imagery at a given location.",
+      "required": [
+        "feasibility_score",
+        "cloud_forecast",
+        "satellite_passes",
+        "capture_windows",
+        "recommendations"
+      ],
+      "properties": {
+        "feasibility_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Overall probability-like score (0–1) for successful capture."
+        },
+        "cloud_forecast": {
+          "type": "object",
+          "description": "Cloud cover forecast for the area and time window.",
+          "required": ["average_cloud_cover", "clear_days"],
+          "properties": {
+            "average_cloud_cover": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Average predicted cloud cover percentage."
+            },
+            "clear_days": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of days with predicted cloud cover below threshold."
+            }
+          },
+          "additionalProperties": false
+        },
+        "satellite_passes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["satellite", "pass_time", "elevation_angle"],
+            "properties": {
+              "satellite": {
+                "type": "string",
+                "description": "Satellite name or identifier."
+              },
+              "pass_time": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Predicted overpass time (ISO 8601)."
+              },
+              "elevation_angle": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 90,
+                "description": "Elevation angle in degrees at time of overpass."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Predicted satellite overpasses for the area."
+        },
+        "capture_windows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "probability"],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Window start (ISO 8601)."
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Window end (ISO 8601)."
+              },
+              "probability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Probability of cloud-free capture during this window."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Ranked capture windows with success probability."
+        },
+        "recommendations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Human-readable recommendations for improving capture success."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "compare_pricing": {
+      "type": "object",
+      "description": "Pricing comparison across providers and resolution tiers.",
+      "required": ["comparisons", "recommended"],
+      "properties": {
+        "comparisons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["provider", "resolution", "price", "sensor_type"],
+            "properties": {
+              "provider": {
+                "type": "string",
+                "description": "Provider name."
+              },
+              "resolution": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Spatial resolution in metres per pixel."
+              },
+              "price": {
+                "$ref": "#/$defs/PriceBreakdown"
+              },
+              "sensor_type": {
+                "$ref": "#/$defs/SensorType"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Individual provider/resolution price points."
+        },
+        "recommended": {
+          "type": "object",
+          "required": ["provider", "resolution", "price", "sensor_type", "reason"],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Recommended provider."
+            },
+            "resolution": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Recommended resolution."
+            },
+            "price": {
+              "$ref": "#/$defs/PriceBreakdown"
+            },
+            "sensor_type": {
+              "$ref": "#/$defs/SensorType"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Explanation for why this option is recommended."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Best-value recommendation."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "place_archive_order": {
+      "description": "Response from placing (or previewing) an archive order. Shape depends on whether the order was confirmed.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "ArchiveOrderPreview",
+          "description": "Returned when confirmed=false. Shows what would be ordered.",
+          "required": ["order_type", "price", "details", "message"],
+          "properties": {
+            "order_type": {
+              "type": "string",
+              "const": "archive",
+              "description": "Always \"archive\" for archive orders."
+            },
+            "price": {
+              "$ref": "#/$defs/PriceBreakdown"
+            },
+            "details": {
+              "type": "object",
+              "description": "Preview details including archive_id, delivery options, and image metadata.",
+              "additionalProperties": true
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable message describing the preview."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "ArchiveOrderConfirmation",
+          "description": "Returned when confirmed=true. The order has been placed.",
+          "required": ["order_id", "status", "price", "estimated_delivery", "message"],
+          "properties": {
+            "order_id": {
+              "type": "string",
+              "description": "Unique order identifier."
+            },
+            "status": {
+              "$ref": "#/$defs/OrderStatus"
+            },
+            "price": {
+              "$ref": "#/$defs/PriceBreakdown"
+            },
+            "estimated_delivery": {
+              "type": "string",
+              "description": "Human-readable estimated delivery time."
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable confirmation message."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "place_tasking_order": {
+      "description": "Response from placing (or previewing) a tasking order. Shape depends on whether the order was confirmed.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "TaskingOrderPreview",
+          "description": "Returned when confirmed=false. Shows what would be ordered.",
+          "required": ["order_type", "price", "details", "message"],
+          "properties": {
+            "order_type": {
+              "type": "string",
+              "const": "tasking",
+              "description": "Always \"tasking\" for tasking orders."
+            },
+            "price": {
+              "$ref": "#/$defs/PriceBreakdown"
+            },
+            "details": {
+              "type": "object",
+              "description": "Preview details including quote_id, provider, resolution, and capture window.",
+              "additionalProperties": true
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable message describing the preview."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "TaskingOrderConfirmation",
+          "description": "Returned when confirmed=true. The order has been placed.",
+          "required": ["order_id", "status", "price", "estimated_delivery", "message"],
+          "properties": {
+            "order_id": {
+              "type": "string",
+              "description": "Unique order identifier."
+            },
+            "status": {
+              "$ref": "#/$defs/OrderStatus"
+            },
+            "price": {
+              "$ref": "#/$defs/PriceBreakdown"
+            },
+            "estimated_delivery": {
+              "type": "string",
+              "description": "Human-readable estimated delivery time."
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable confirmation message."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "get_order_status": {
+      "type": "object",
+      "description": "Current status and metadata for an order.",
+      "required": ["order_id", "status", "created_at", "updated_at", "price"],
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "Unique order identifier."
+        },
+        "status": {
+          "$ref": "#/$defs/OrderStatus"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the order was created (ISO 8601)."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last status change (ISO 8601)."
+        },
+        "price": {
+          "$ref": "#/$defs/PriceBreakdown"
+        },
+        "delivery_urls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": "Download URLs for delivered imagery. Present only when status is \"delivered\"."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional order metadata (provider, sensor, resolution, etc.).",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "list_orders": {
+      "type": "object",
+      "description": "Paginated list of orders.",
+      "required": ["orders", "pagination"],
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/OrderSummary" },
+          "description": "Orders on the current page."
+        },
+        "pagination": {
+          "$ref": "#/$defs/PaginationInfo"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_order_images": {
+      "type": "object",
+      "description": "Download URLs and metadata for imagery in a delivered order.",
+      "required": ["order_id", "images"],
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "Unique order identifier."
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["url", "format", "size_mb"],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Pre-signed download URL."
+              },
+              "format": {
+                "type": "string",
+                "description": "File format of the image (e.g. \"geotiff\", \"nitf\")."
+              },
+              "size_mb": {
+                "type": "number",
+                "minimum": 0,
+                "description": "File size in megabytes."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Available images for download."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "setup_aoi_monitoring": {
+      "type": "object",
+      "description": "Confirmation of a newly created area-of-interest monitor.",
+      "required": ["monitor", "message"],
+      "properties": {
+        "monitor": {
+          "$ref": "#/$defs/MonitorInfo",
+          "description": "The newly created monitor."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable confirmation message."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "list_monitors": {
+      "type": "object",
+      "description": "List of all active area-of-interest monitors.",
+      "required": ["monitors"],
+      "properties": {
+        "monitors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MonitorInfo" },
+          "description": "Active monitors."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "delete_monitor": {
+      "type": "object",
+      "description": "Confirmation that a monitor was deleted.",
+      "required": ["monitor_id", "deleted", "message"],
+      "properties": {
+        "monitor_id": {
+          "type": "string",
+          "description": "Identifier of the deleted monitor."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "True if the monitor was successfully deleted."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable confirmation message."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_webhook_status": {
+      "type": "object",
+      "description": "Health and delivery statistics for a webhook subscription.",
+      "required": [
+        "subscription_id",
+        "status",
+        "last_delivery_at",
+        "delivery_count",
+        "failure_count"
+      ],
+      "properties": {
+        "subscription_id": {
+          "type": "string",
+          "description": "Unique webhook subscription identifier."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "paused", "error", "disabled"],
+          "description": "Current status of the subscription."
+        },
+        "last_delivery_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Timestamp of the last successful delivery (ISO 8601), or null if none."
+        },
+        "delivery_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of successful deliveries."
+        },
+        "failure_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of failed delivery attempts."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "check_notifications": {
+      "type": "object",
+      "description": "Pending notifications for the authenticated user.",
+      "required": ["notifications", "unread_count"],
+      "properties": {
+        "notifications": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Notification" },
+          "description": "List of notifications."
+        },
+        "unread_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of unread notifications."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "geocode": {
+      "type": "object",
+      "description": "Geocoding results for a text query.",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["lat", "lon", "display_name"],
+            "properties": {
+              "lat": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90,
+                "description": "Latitude in decimal degrees."
+              },
+              "lon": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180,
+                "description": "Longitude in decimal degrees."
+              },
+              "display_name": {
+                "type": "string",
+                "description": "Full display name of the matched location."
+              },
+              "geometry": {
+                "$ref": "#/$defs/GeoJSONGeometry",
+                "description": "Geometry of the matched feature (point, polygon, etc.)."
+              },
+              "osm_type": {
+                "type": "string",
+                "description": "OpenStreetMap feature type (node, way, relation)."
+              },
+              "osm_id": {
+                "type": "integer",
+                "description": "OpenStreetMap feature ID."
+              },
+              "importance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Relevance score (0–1) for the match."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Matching locations, ordered by relevance."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "reverse_geocode": {
+      "type": "object",
+      "description": "Address information for a pair of coordinates.",
+      "required": ["address", "lat", "lon"],
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Human-readable address for the location."
+        },
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "Latitude that was looked up."
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "Longitude that was looked up."
+        },
+        "details": {
+          "type": "object",
+          "description": "Structured address components (house_number, road, city, state, country, postcode, etc.).",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "search_pois": {
+      "type": "object",
+      "description": "Points of interest found near the specified location.",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "category", "lat", "lon", "distance_m"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the point of interest."
+              },
+              "category": {
+                "type": "string",
+                "description": "POI category."
+              },
+              "lat": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90,
+                "description": "Latitude in decimal degrees."
+              },
+              "lon": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180,
+                "description": "Longitude in decimal degrees."
+              },
+              "distance_m": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Distance from the search location in metres."
+              },
+              "osm_id": {
+                "type": "integer",
+                "description": "OpenStreetMap feature ID."
+              },
+              "tags": {
+                "type": "object",
+                "description": "Additional OSM tags for the feature.",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Matching points of interest sorted by distance."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_area_boundary": {
+      "type": "object",
+      "description": "Administrative boundary polygon for the named area.",
+      "required": ["name", "geometry", "admin_level", "osm_id"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Canonical name of the administrative area."
+        },
+        "geometry": {
+          "$ref": "#/$defs/GeoJSONGeometry",
+          "description": "Boundary polygon/multipolygon."
+        },
+        "admin_level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 11,
+          "description": "OSM admin_level of the returned boundary."
+        },
+        "osm_id": {
+          "type": "integer",
+          "description": "OpenStreetMap relation ID for the boundary."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -19,6 +19,22 @@ from interfaces import (
 )
 
 from skyfi_mcp.client.osm import OSMClient
+from skyfi_mcp.validation import (
+    validate_address,
+    validate_geojson_geometry,
+    validate_string_length,
+    MAX_AREA_NAME_LENGTH,
+)
+
+
+def _validate_location(location: object) -> None:
+    """Validate a LocationInput's geometry and address fields."""
+    geometry = getattr(location, "geometry", None)
+    address = getattr(location, "address", None)
+    if geometry is not None:
+        validate_geojson_geometry(geometry)
+    if address is not None:
+        validate_address(address)
 
 
 async def geocode(
@@ -26,6 +42,7 @@ async def geocode(
     input: GeocodeInput,
 ) -> GeocodeOutput:
     """Convert an address or place name to coordinates."""
+    validate_string_length(input.query, "query")
     return await client.geocode(input.query)
 
 
@@ -42,6 +59,8 @@ async def search_pois(
     input: SearchPOIsInput,
 ) -> SearchPOIsOutput:
     """Find points of interest near a location."""
+    _validate_location(input.location)
+
     # Resolve location to lat/lon
     if input.location.geometry is not None:
         coords = input.location.geometry.coordinates
@@ -77,6 +96,8 @@ async def get_area_boundary(
     input: GetAreaBoundaryInput,
 ) -> AreaBoundaryOutput:
     """Get the GeoJSON boundary polygon for a named area."""
+    # Validate name length (sanitization happens inside OSMClient)
+    validate_string_length(input.name, "name", MAX_AREA_NAME_LENGTH)
     return await client.get_area_boundary(
         name=input.name,
         admin_level=input.admin_level,

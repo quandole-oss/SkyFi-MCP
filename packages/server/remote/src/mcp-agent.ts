@@ -7,13 +7,18 @@
  *
  * Section 3.4 Pain Point 1: Use McpAgent (not createMcpHandler) — we need
  * per-session state, SSE, and notification queues.
+ *
+ * Phase 4 additions:
+ *   - SQLite-backed notification queue (this.sql)
+ *   - Internal webhook dispatch endpoint (POST /_internal/notify)
+ *   - check_notifications reads from local DO queue instead of proxying
  */
 
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import type { Env, Props } from "./types.js";
+import type { Env, Props, StoredNotification, WebhookPayload } from "./types.js";
 import { proxyToolCall } from "./proxy.js";
 
 // ---------------------------------------------------------------------------
@@ -91,7 +96,168 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
     version: "1.0.0",
   });
 
+  // -------------------------------------------------------------------------
+  // SQLite notification queue — schema init
+  // -------------------------------------------------------------------------
+
+  /** Ensure the notifications table exists (idempotent). */
+  private initNotificationsTable(): void {
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        monitor_id TEXT NOT NULL DEFAULT '',
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        read INTEGER DEFAULT 0
+      )
+    `);
+  }
+
+  // -------------------------------------------------------------------------
+  // Notification queue — internal methods
+  // -------------------------------------------------------------------------
+
+  /** Store a webhook notification in the local SQLite queue. */
+  private storeNotification(notification: {
+    id: string;
+    type: string;
+    monitorId: string;
+    payload: Record<string, unknown>;
+  }): void {
+    this.sql.exec(
+      `INSERT OR REPLACE INTO notifications (id, type, monitor_id, payload, created_at, read)
+       VALUES (?, ?, ?, ?, ?, 0)`,
+      notification.id,
+      notification.type,
+      notification.monitorId,
+      JSON.stringify(notification.payload),
+      new Date().toISOString(),
+    );
+  }
+
+  /** Read unread notifications, optionally limited. */
+  private getUnreadNotifications(limit: number = 50): StoredNotification[] {
+    return this.sql
+      .exec<StoredNotification>(
+        `SELECT id, type, monitor_id, payload, created_at, read
+         FROM notifications
+         WHERE read = 0
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        limit,
+      )
+      .toArray();
+  }
+
+  /** Mark specific notifications as read. */
+  private markNotificationsRead(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    // Build placeholders
+    const placeholders = ids.map(() => "?").join(",");
+    const result = this.sql.exec(
+      `UPDATE notifications SET read = 1 WHERE id IN (${placeholders})`,
+      ...ids,
+    );
+    return result.rowsWritten;
+  }
+
+  /** Mark all unread notifications as read. */
+  private markAllNotificationsRead(): number {
+    const result = this.sql.exec(
+      `UPDATE notifications SET read = 1 WHERE read = 0`,
+    );
+    return result.rowsWritten;
+  }
+
+  // -------------------------------------------------------------------------
+  // Fetch handler override — accept internal webhook dispatches
+  // -------------------------------------------------------------------------
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Internal endpoint: receive webhook dispatches from the Worker
+    if (url.pathname === "/_internal/notify" && request.method === "POST") {
+      return this.handleInternalNotify(request);
+    }
+
+    // Internal endpoint: mark notifications as read
+    if (url.pathname === "/_internal/mark-read" && request.method === "POST") {
+      return this.handleMarkRead(request);
+    }
+
+    // Everything else goes to the default McpAgent fetch handler
+    // (MCP protocol negotiation, SSE, etc.)
+    return super.fetch(request);
+  }
+
+  /** Handle POST /_internal/notify — store an incoming webhook notification. */
+  private async handleInternalNotify(request: Request): Promise<Response> {
+    let body: WebhookPayload;
+    try {
+      body = (await request.json()) as WebhookPayload;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "bad_request", message: "Invalid JSON" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    // Generate a unique notification ID
+    const id = crypto.randomUUID();
+
+    this.storeNotification({
+      id,
+      type: body.event_type ?? "unknown",
+      monitorId: body.monitor_id ?? "",
+      payload: body.data ?? {},
+    });
+
+    return new Response(
+      JSON.stringify({ stored: true, notification_id: id }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  /** Handle POST /_internal/mark-read — mark notifications as read. */
+  private async handleMarkRead(request: Request): Promise<Response> {
+    let body: { ids?: string[]; all?: boolean };
+    try {
+      body = (await request.json()) as { ids?: string[]; all?: boolean };
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "bad_request", message: "Invalid JSON" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    let updated: number;
+    if (body.all) {
+      updated = this.markAllNotificationsRead();
+    } else if (body.ids && Array.isArray(body.ids)) {
+      updated = this.markNotificationsRead(body.ids);
+    } else {
+      return new Response(
+        JSON.stringify({ error: "bad_request", message: "Provide ids array or all:true" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ marked_read: updated }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // MCP tool registration
+  // -------------------------------------------------------------------------
+
   async init() {
+    // Initialize the notifications table on first use
+    this.initNotificationsTable();
+
     // Convenience: proxy a tool call to the Python service
     const proxy = async (
       toolName: string,
@@ -346,10 +512,42 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
 
     this.server.tool(
       "check_notifications",
-      "Check for unread notifications (new imagery alerts, order updates).",
-      {},
-      async (input) => proxy("check_notifications", input),
-      { annotations: READ_ONLY },
+      "Check for unread notifications (new imagery alerts, order updates). Returns notifications from the local queue.",
+      {
+        limit: z.number().int().min(1).max(100).default(20).describe("Max notifications to return"),
+        mark_read: z.boolean().default(false).describe("Mark returned notifications as read"),
+      },
+      async (input) => {
+        // Read from local DO SQLite queue instead of proxying to Python
+        const notifications = this.getUnreadNotifications(input.limit);
+
+        // Optionally mark as read
+        if (input.mark_read && notifications.length > 0) {
+          const ids = notifications.map((n) => n.id);
+          this.markNotificationsRead(ids);
+        }
+
+        const result = {
+          unread_count: notifications.length,
+          notifications: notifications.map((n) => ({
+            id: n.id,
+            type: n.type,
+            monitor_id: n.monitor_id || undefined,
+            data: JSON.parse(n.payload),
+            created_at: n.created_at,
+          })),
+        };
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(result),
+            },
+          ],
+        };
+      },
+      { annotations: READ_ONLY_NON_IDEMPOTENT },
     );
 
     // -----------------------------------------------------------------------

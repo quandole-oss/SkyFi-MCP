@@ -54,6 +54,12 @@ from interfaces import (
     POICategory,
 )
 
+from skyfi_mcp.validation import (
+    validate_array_length,
+    validate_geojson_geometry,
+    validate_address,
+)
+
 # ---------------------------------------------------------------------------
 # Annotation presets
 # ---------------------------------------------------------------------------
@@ -104,17 +110,20 @@ _osm_client = OSMClient()
 # ---------------------------------------------------------------------------
 
 def _build_location(location: dict[str, Any]) -> LocationInput:
-    """Build a LocationInput from a raw dict."""
+    """Build a LocationInput from a raw dict, with validation."""
     geometry = None
     address = None
     if "geometry" in location:
         g = location["geometry"]
         geometry = GeoJSONGeometry(type=g["type"], coordinates=g["coordinates"])
     if "address" in location:
-        address = location["address"]
+        address = validate_address(location["address"])
     # If top-level has type+coordinates, treat as geometry directly
     if "type" in location and "coordinates" in location and geometry is None:
         geometry = GeoJSONGeometry(type=location["type"], coordinates=location["coordinates"])
+    # Validate GeoJSON geometry coordinates
+    if geometry is not None:
+        validate_geojson_geometry(geometry)
     return LocationInput(geometry=geometry, address=address)
 
 
@@ -300,6 +309,7 @@ async def compare_pricing(
     resolution_options: list[float],
 ) -> dict[str, Any]:
     """Compare pricing across providers and resolutions."""
+    validate_array_length(resolution_options, "resolution_options")
     input_model = ComparePricingInput(
         location=_build_location(location),
         resolution_options=resolution_options,

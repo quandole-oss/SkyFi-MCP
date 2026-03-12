@@ -53,5 +53,39 @@ export async function proxyToolCall(
     };
   }
 
+  // Scrub the API key from any error response to prevent credential leaks
+  if (!res.ok && request.apiKey) {
+    data = scrubSensitive(data, request.apiKey);
+  }
+
   return { ok: res.ok, status: res.status, data };
+}
+
+/**
+ * Recursively replace occurrences of a sensitive value in an object.
+ */
+function scrubSensitive(
+  obj: Record<string, unknown>,
+  secret: string,
+): Record<string, unknown> {
+  if (!secret) return obj;
+
+  function scrub(value: unknown): unknown {
+    if (typeof value === "string") {
+      return value.replaceAll(secret, "[REDACTED]");
+    }
+    if (Array.isArray(value)) {
+      return value.map(scrub);
+    }
+    if (value !== null && typeof value === "object") {
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        result[k] = scrub(v);
+      }
+      return result;
+    }
+    return value;
+  }
+
+  return scrub(obj) as Record<string, unknown>;
 }

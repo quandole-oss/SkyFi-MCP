@@ -24,6 +24,7 @@ from skyfi_mcp.client.models import (
     ReverseGeocodeOutput,
     SearchPOIsOutput,
 )
+from skyfi_mcp.validation import sanitize_overpass_value
 
 logger = logging.getLogger(__name__)
 
@@ -239,10 +240,19 @@ out center body;
         admin_level: int | None = None,
     ) -> AreaBoundaryOutput:
         """Fetch the boundary polygon of a named area (city, region, etc.)."""
-        admin_filter = f'["admin_level"="{admin_level}"]' if admin_level else ""
+        # Sanitize user input to prevent Overpass QL injection
+        safe_name = sanitize_overpass_value(name)
+
+        # admin_level is already validated as int|None by the input model,
+        # but clamp it to valid OSM range as defense-in-depth
+        admin_filter = ""
+        if admin_level is not None:
+            admin_level = max(1, min(11, int(admin_level)))
+            admin_filter = f'["admin_level"="{admin_level}"]'
+
         query = f"""
 [out:json][timeout:25];
-relation["name"="{name}"]["boundary"="administrative"]{admin_filter};
+relation["name"="{safe_name}"]["boundary"="administrative"]{admin_filter};
 out geom;
 """
         async with httpx.AsyncClient(timeout=self._timeout) as client:

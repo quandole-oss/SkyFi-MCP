@@ -49,6 +49,27 @@ class SkyFiClient:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _scrub_sensitive(data: dict[str, Any], api_key: str) -> dict[str, Any]:
+        """Remove the API key from error response data to prevent credential leaks.
+
+        Recursively walks the dict and replaces any occurrence of the API key
+        with a redacted placeholder.
+        """
+        if not api_key:
+            return data
+
+        def _scrub(obj: Any) -> Any:
+            if isinstance(obj, str):
+                return obj.replace(api_key, "[REDACTED]")
+            if isinstance(obj, dict):
+                return {k: _scrub(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_scrub(item) for item in obj]
+            return obj
+
+        return _scrub(data)  # type: ignore[return-value]
+
     async def _request(
         self,
         method: str,
@@ -81,20 +102,22 @@ class SkyFiClient:
                 body = exc.response.json()
             except Exception:
                 body = {"raw": exc.response.text}
+            # Scrub the API key from any error details to prevent leaks
+            safe_body = self._scrub_sensitive(body, api_key)
             error = SkyFiAPIError(
                 status_code=exc.response.status_code,
-                error=body.get("error", "http_error"),
-                message=body.get("message", str(exc)),
-                details={k: v for k, v in body.items() if k not in ("error", "message")},
+                error=safe_body.get("error", "http_error"),
+                message=safe_body.get("message", f"HTTP {exc.response.status_code} error"),
+                details={k: v for k, v in safe_body.items() if k not in ("error", "message")},
             )
-            raise ValueError(error.model_dump_json()) from exc
+            raise ValueError(error.model_dump_json()) from None
         except httpx.RequestError as exc:
             error = SkyFiAPIError(
                 status_code=0,
                 error="connection_error",
                 message=f"Failed to connect to SkyFi API: {type(exc).__name__}",
             )
-            raise ValueError(error.model_dump_json()) from exc
+            raise ValueError(error.model_dump_json()) from None
 
     # --------------------------------------------------------------------- #
     # Archive Search

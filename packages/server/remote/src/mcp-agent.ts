@@ -218,7 +218,14 @@ export class SkyFiMCP extends DurableObject<Env> {
         this.initialized = true;
       }
 
-      return await this.transport!.handleRequest(request);
+      const response = await this.transport!.handleRequest(request);
+
+      // F-2: SDK returns 200 for DELETE, spec requires 204 No Content
+      if (request.method === "DELETE" && response.status === 200) {
+        return new Response(null, { status: 204, headers: response.headers });
+      }
+
+      return response;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return new Response(

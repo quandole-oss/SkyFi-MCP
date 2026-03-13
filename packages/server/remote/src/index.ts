@@ -257,6 +257,22 @@ async function handleMcp(
     try {
       const body = await request.json();
       validatedBody = JSON.stringify(body);
+
+      // F-3: Notifications (no "id" field) without session ID should return 202
+      // per MCP spec. The SDK validates session before checking for notification-only
+      // messages, so we intercept here.
+      if (!request.headers.get("Mcp-Session-Id")) {
+        const messages = Array.isArray(body) ? body : [body];
+        const hasRequests = messages.some(
+          (msg: unknown) =>
+            typeof msg === "object" &&
+            msg !== null &&
+            "id" in (msg as Record<string, unknown>),
+        );
+        if (!hasRequests) {
+          return new Response(null, { status: 202 });
+        }
+      }
     } catch {
       return new Response(
         JSON.stringify({

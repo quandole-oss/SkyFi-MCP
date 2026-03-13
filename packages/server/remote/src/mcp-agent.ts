@@ -1,21 +1,20 @@
 /**
- * SkyFi MCP Worker — McpAgent Durable Object
+ * SkyFi MCP Worker — Durable Object
  *
- * Extends McpAgent from the Cloudflare Agents SDK to expose all 21 SkyFi
- * MCP tools.  Each tool validates input with zod, then proxies to the
- * Python service via fetch.
- *
- * Section 3.4 Pain Point 1: Use McpAgent (not createMcpHandler) — we need
- * per-session state, SSE, and notification queues.
+ * Extends DurableObject to expose all 21 SkyFi MCP tools via
+ * WebStandardStreamableHTTPServerTransport from the MCP SDK.
+ * Each tool validates input with zod, then proxies to the Python service
+ * via fetch.
  *
  * Phase 4 additions:
- *   - SQLite-backed notification queue (this.sql)
+ *   - SQLite-backed notification queue (this.ctx.storage.sql)
  *   - Internal webhook dispatch endpoint (POST /_internal/notify)
  *   - check_notifications reads from local DO queue instead of proxying
  */
 
-import { McpAgent } from "agents/mcp";
+import { DurableObject } from "cloudflare:workers";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 
 import type { Env, Props, StoredNotification, WebhookPayload } from "./types.js";
@@ -84,11 +83,16 @@ const CREATE = {
 // SkyFiMCP Durable Object
 // ---------------------------------------------------------------------------
 
-export class SkyFiMCP extends McpAgent<Env, {}, Props> {
-  server = new McpServer({
-    name: "skyfi_mcp",
-    version: "1.0.0",
-  });
+export class SkyFiMCP extends DurableObject<Env> {
+  server = new McpServer({ name: "skyfi_mcp", version: "1.0.0" });
+  private transport: WebStandardStreamableHTTPServerTransport | null = null;
+  private props: Props | undefined;
+  private initialized = false;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.initNotificationsTable();
+  }
 
   // -------------------------------------------------------------------------
   // SQLite notification queue — schema init
@@ -181,9 +185,35 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       return this.handleMarkRead(request);
     }
 
-    // Everything else goes to the default McpAgent fetch handler
-    // (MCP protocol negotiation, SSE, etc.)
-    return super.fetch(request);
+    // Extract props from header (set by the Worker's handleMcp)
+    const propsHeader = request.headers.get("X-MCP-Props");
+    if (propsHeader) {
+      this.props = JSON.parse(propsHeader) as Props;
+    }
+
+    // Require API key
+    if (!this.props?.skyfiApiKey) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Missing API key in props" },
+          id: null,
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    // Lazy init: create transport, register tools, connect server
+    if (!this.initialized) {
+      this.transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: () => this.ctx.id.toString(),
+      });
+      await this.init();
+      await this.server.connect(this.transport);
+      this.initialized = true;
+    }
+
+    return this.transport!.handleRequest(request);
   }
 
   /** Handle POST /_internal/notify — store an incoming webhook notification. */

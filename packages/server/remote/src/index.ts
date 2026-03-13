@@ -244,8 +244,8 @@ async function handleMcp(
   const stub = env.SKYFI_MCP.get(id);
 
   // Forward the request to the Durable Object.
-  // The DO's fetch handler (provided by McpAgent) will handle MCP
-  // protocol negotiation (Streamable HTTP or SSE).
+  // The DO's fetch handler uses WebStandardStreamableHTTPServerTransport
+  // to handle MCP protocol negotiation (Streamable HTTP).
   //
   // We pass the props via a custom header so the DO can pick them up
   // before the MCP session starts.

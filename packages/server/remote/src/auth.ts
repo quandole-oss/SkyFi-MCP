@@ -118,44 +118,44 @@ async function verifyJWT(
   token: string,
   secret: string,
 ): Promise<JWTPayload | null> {
-  const parts = token.split(".");
-  if (parts.length !== 3) {
-    return null;
-  }
-
-  const [headerB64, payloadB64, signatureB64] = parts;
-  const signingInput = `${headerB64}.${payloadB64}`;
-
-  // Verify signature
-  const key = await getSigningKey(secret);
-  const signatureBytes = base64urlDecode(signatureB64!);
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    signatureBytes,
-    new TextEncoder().encode(signingInput),
-  );
-
-  if (!valid) {
-    return null;
-  }
-
-  // Decode payload
-  let payload: JWTPayload;
   try {
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const signingInput = `${headerB64}.${payloadB64}`;
+
+    // Verify signature
+    const key = await getSigningKey(secret);
+    const signatureBytes = base64urlDecode(signatureB64!);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      signatureBytes,
+      new TextEncoder().encode(signingInput),
+    );
+
+    if (!valid) {
+      return null;
+    }
+
+    // Decode payload
     const payloadJson = new TextDecoder().decode(base64urlDecode(payloadB64!));
-    payload = JSON.parse(payloadJson) as JWTPayload;
+    const payload = JSON.parse(payloadJson) as JWTPayload;
+
+    // Check expiry
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < now) {
+      return null;
+    }
+
+    return payload;
   } catch {
+    // Malformed token (invalid base64, bad JSON, etc.)
     return null;
   }
-
-  // Check expiry
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp && payload.exp < now) {
-    return null;
-  }
-
-  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,14 +210,22 @@ export async function extractProps(
     if (match?.[1]) {
       const token = match[1];
 
-      // Try to verify as JWT first
-      const payload = await verifyJWT(token, env.OAUTH_CLIENT_SECRET);
-      if (payload?.skyfiApiKey) {
-        return { skyfiApiKey: payload.skyfiApiKey };
+      // If the token looks like a JWT (three dot-separated parts),
+      // it MUST verify as one. Otherwise treat it as a raw API key
+      // for backwards compatibility with headless clients that pass
+      // Authorization: Bearer <raw-skyfi-api-key>.
+      const looksLikeJwt = token.split(".").length === 3;
+
+      if (looksLikeJwt) {
+        const payload = await verifyJWT(token, env.OAUTH_CLIENT_SECRET);
+        if (payload?.skyfiApiKey) {
+          return { skyfiApiKey: payload.skyfiApiKey };
+        }
+        // Invalid or expired JWT — reject
+        return null;
       }
 
-      // If it's not a valid JWT, treat it as a raw API key
-      // (backwards compatibility for headless clients)
+      // Raw API key in Bearer header
       return { skyfiApiKey: token };
     }
   }

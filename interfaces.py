@@ -274,15 +274,31 @@ class PlaceArchiveOrderInput(BaseModel):
 class PlaceTaskingOrderInput(BaseModel):
     """Input for place_tasking_order tool."""
 
-    quote_id: str = Field(
+    location: LocationInput = Field(
         ...,
-        description="Quote ID from a previous get_tasking_quote call.",
+        description="Area of interest for the tasking order.",
+    )
+    window_start: datetime = Field(
+        ...,
+        description="Capture window start (ISO 8601 datetime, UTC).",
+    )
+    window_end: datetime = Field(
+        ...,
+        description="Capture window end (ISO 8601 datetime, UTC).",
+    )
+    product_type: str = Field(
+        "DAY",
+        description="Product type: DAY, SAR, MULTISPECTRAL, HYPERSPECTRAL, etc.",
+    )
+    resolution: str = Field(
+        "HIGH",
+        description="Resolution tier: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH.",
     )
     confirmed: bool = Field(
         False,
         description=(
-            "Must be true to execute the order. If false or omitted, returns the quote "
-            "details and requires the user to confirm."
+            "Must be true to execute the order. If false or omitted, returns a price "
+            "preview and requires the user to confirm."
         ),
     )
 

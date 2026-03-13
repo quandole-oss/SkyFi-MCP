@@ -1,0 +1,13 @@
+# Base MCP dependencies
+-r requirements.txt
+
+# LangGraph agent framework
+langgraph>=0.2.0
+langchain-mcp-adapters>=0.1.0
+
+# LLM providers (install at least one)
+langchain-anthropic>=0.3.0
+langchain-openai>=0.3.0
+
+# CLI output
+rich>=13.0.0

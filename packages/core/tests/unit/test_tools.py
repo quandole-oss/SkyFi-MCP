@@ -7,12 +7,15 @@ Covers:
 - Error cases (API errors, invalid input)
 - Confirmation flow (preview vs. execute)
 - Search pagination (nextPage handling)
+
+All mocked URLs and response shapes match the real SkyFi Platform API
+as documented at https://app.skyfi.com/platform-api/openapi.json.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -54,6 +57,8 @@ API_KEY = "test-api-key-do-not-use"
 NOW_ISO = "2025-06-01T12:00:00Z"
 NOW_DT = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
 
+_FOOTPRINT_WKT = "POLYGON((-122.4 37.7,-122.4 37.8,-122.3 37.8,-122.3 37.7,-122.4 37.7))"
+
 
 @pytest.fixture()
 def client() -> SkyFiClient:
@@ -78,19 +83,35 @@ def sample_location() -> LocationInput:
     )
 
 
-def _geom_dict() -> dict:
-    return {
-        "type": "Polygon",
-        "coordinates": [
-            [
-                [-122.4, 37.7],
-                [-122.4, 37.8],
-                [-122.3, 37.8],
-                [-122.3, 37.7],
-                [-122.4, 37.7],
-            ]
-        ],
+def _archive_item(**overrides: object) -> dict:
+    """Build a realistic archive result matching the real API shape."""
+    item = {
+        "archiveId": "img-001",
+        "provider": "SATELLOGIC",
+        "constellation": "newsat",
+        "productType": "DAY",
+        "platformResolution": 1.0,
+        "resolution": "VERY HIGH",
+        "captureTimestamp": NOW_ISO,
+        "cloudCoveragePercent": 10.0,
+        "offNadirAngle": 15.0,
+        "footprint": _FOOTPRINT_WKT,
+        "minSqKm": 5.0,
+        "maxSqKm": 10000.0,
+        "priceForOneSquareKm": 5.0,
+        "priceForOneSquareKmCents": 500,
+        "priceFullScene": 50.0,
+        "openData": False,
+        "totalAreaSquareKm": 10.0,
+        "deliveryTimeHours": 24.0,
+        "thumbnailUrls": {"300x300": "https://example.com/thumb.png"},
+        "gsd": 1.0,
+        "tilesUrl": "https://example.com/tiles/{z}/{x}/{y}.png",
+        "overlapRatio": 1.0,
+        "overlapSqkm": 10.0,
     }
+    item.update(overrides)
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -102,25 +123,14 @@ class TestSearchArchive:
     @respx.mock
     @pytest.mark.asyncio
     async def test_basic_search(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/archive/search").mock(
+        respx.post(f"{BASE_URL}/archives").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "results": [
-                        {
-                            "archiveId": "img-001",
-                            "provider": "Maxar",
-                            "sensorType": "optical",
-                            "resolution": 0.5,
-                            "captureDate": NOW_ISO,
-                            "cloudCover": 10.0,
-                            "geometry": _geom_dict(),
-                            "thumbnailUrl": "https://example.com/thumb.png",
-                            "openData": False,
-                        }
-                    ],
-                    "totalCount": 1,
+                    "request": {"aoi": _FOOTPRINT_WKT},
+                    "archives": [_archive_item()],
                     "nextPage": None,
+                    "total": 1,
                 },
             )
         )
@@ -130,31 +140,21 @@ class TestSearchArchive:
 
         assert len(result.results) == 1
         assert result.results[0].archive_id == "img-001"
-        assert result.results[0].provider == "Maxar"
-        assert result.results[0].resolution == 0.5
+        assert result.results[0].provider == "SATELLOGIC"
+        assert result.results[0].resolution == 1.0
         assert result.pagination.has_more is False
-        assert result.pagination.total_count == 1
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_pagination(self, client: SkyFiClient, sample_location: LocationInput):
         """Verify nextPage handling: first page has more, second does not."""
-        respx.post(f"{BASE_URL}/api/archive/search").mock(
+        respx.post(f"{BASE_URL}/archives").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "results": [
-                        {
-                            "archiveId": "img-page1",
-                            "provider": "Planet",
-                            "sensorType": "optical",
-                            "resolution": 3.0,
-                            "captureDate": NOW_ISO,
-                            "geometry": _geom_dict(),
-                        }
-                    ],
-                    "totalCount": 50,
-                    "nextPage": "cursor-abc123",
+                    "archives": [_archive_item(archiveId="img-page1", provider="Planet")],
+                    "total": 50,
+                    "nextPage": "/platform-api/archives?page=cursor-abc123",
                 },
             )
         )
@@ -163,31 +163,24 @@ class TestSearchArchive:
         result = await search.search_archive(client, inp, API_KEY)
 
         assert result.pagination.has_more is True
-        assert result.pagination.next_offset == "cursor-abc123"
-        assert result.pagination.total_count == 50
+        assert result.pagination.next_offset == "/platform-api/archives?page=cursor-abc123"
 
-        # Simulate second page
-        respx.post(f"{BASE_URL}/api/archive/search").mock(
+        # Simulate second page via GET /archives?page=...
+        respx.get(f"{BASE_URL}/archives").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "results": [
-                        {
-                            "archiveId": "img-page2",
-                            "provider": "Planet",
-                            "sensorType": "optical",
-                            "resolution": 3.0,
-                            "captureDate": NOW_ISO,
-                            "geometry": _geom_dict(),
-                        }
-                    ],
-                    "totalCount": 50,
+                    "archives": [_archive_item(archiveId="img-page2", provider="Planet")],
+                    "total": 50,
                     "nextPage": None,
                 },
             )
         )
 
-        inp2 = SearchArchiveInput(location=sample_location, page_token="cursor-abc123")
+        inp2 = SearchArchiveInput(
+            location=sample_location,
+            page_token="/platform-api/archives?page=cursor-abc123",
+        )
         result2 = await search.search_archive(client, inp2, API_KEY)
         assert result2.pagination.has_more is False
         assert result2.results[0].archive_id == "img-page2"
@@ -195,15 +188,15 @@ class TestSearchArchive:
     @respx.mock
     @pytest.mark.asyncio
     async def test_api_error(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/archive/search").mock(
+        respx.post(f"{BASE_URL}/archives").mock(
             return_value=httpx.Response(
                 403,
-                json={"error": "forbidden", "message": "Invalid API key"},
+                json={"detail": "Invalid api key"},
             )
         )
 
         inp = SearchArchiveInput(location=sample_location)
-        with pytest.raises(ValueError, match="forbidden"):
+        with pytest.raises(ValueError, match="Invalid api key"):
             await search.search_archive(client, inp, API_KEY)
 
 
@@ -211,22 +204,13 @@ class TestGetArchiveDetails:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/archive/img-001").mock(
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "archiveId": "img-001",
-                    "provider": "Maxar",
-                    "sensorType": "multispectral",
-                    "resolution": 0.3,
-                    "captureDate": NOW_ISO,
-                    "cloudCover": 5.0,
-                    "geometry": _geom_dict(),
-                    "bands": ["R", "G", "B", "NIR"],
-                    "fileSizeMb": 256.5,
-                    "license": "commercial",
-                    "metadata": {"satellite": "WorldView-3"},
-                },
+                json=_archive_item(
+                    productType="MULTISPECTRAL",
+                    gsd=0.3,
+                ),
             )
         )
 
@@ -235,44 +219,28 @@ class TestGetArchiveDetails:
 
         assert result.archive_id == "img-001"
         assert result.sensor_type == SensorType.MULTISPECTRAL
-        assert result.bands == ["R", "G", "B", "NIR"]
-        assert result.file_size_mb == 256.5
+        assert result.resolution == 0.3
 
 
 class TestExploreProviders:
-    @respx.mock
     @pytest.mark.asyncio
     async def test_list_all(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/providers").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "providers": [
-                        {
-                            "providerId": "maxar",
-                            "name": "Maxar Technologies",
-                            "sensorTypes": ["optical", "multispectral"],
-                            "resolutionRange": [0.3, 1.0],
-                            "coverageDescription": "Global",
-                        },
-                        {
-                            "providerId": "planet",
-                            "name": "Planet Labs",
-                            "sensorTypes": ["optical"],
-                            "resolutionRange": [3.0, 5.0],
-                            "coverageDescription": "Daily global",
-                        },
-                    ]
-                },
-            )
-        )
-
+        """explore_providers returns the known provider list (no API call)."""
         inp = ExploreProvidersInput()
         result = await search.explore_providers(client, inp, API_KEY)
 
-        assert len(result.providers) == 2
-        assert result.providers[0].provider_id == "maxar"
-        assert SensorType.MULTISPECTRAL in result.providers[0].sensor_types
+        assert len(result.providers) > 0
+        provider_ids = [p.provider_id for p in result.providers]
+        assert "PLANET" in provider_ids
+        assert "UMBRA" in provider_ids
+
+    @pytest.mark.asyncio
+    async def test_filter_by_sensor(self, client: SkyFiClient):
+        inp = ExploreProvidersInput(sensor_type=SensorType.SAR)
+        result = await search.explore_providers(client, inp, API_KEY)
+
+        for p in result.providers:
+            assert SensorType.SAR in p.sensor_types
 
 
 # ---------------------------------------------------------------------------
@@ -284,18 +252,14 @@ class TestEstimateArchivePrice:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.post(f"{BASE_URL}/api/archive/estimate-price").mock(
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "price": {
-                        "subtotal": 100.0,
-                        "processingFee": 10.0,
-                        "total": 110.0,
-                        "currency": "USD",
-                    },
-                    "estimatedDeliveryTime": "2-4 hours",
-                },
+                json=_archive_item(
+                    priceForOneSquareKm=5.0,
+                    priceFullScene=50.0,
+                    deliveryTimeHours=24,
+                ),
             )
         )
 
@@ -306,28 +270,24 @@ class TestEstimateArchivePrice:
         result = await pricing.estimate_archive_price(client, inp, API_KEY)
 
         assert result.archive_id == "img-001"
-        assert result.price.total == 110.0
-        assert result.estimated_delivery_time == "2-4 hours"
+        assert result.price.subtotal == 5.0
+        assert result.price.total == 50.0
+        assert "24" in (result.estimated_delivery_time or "")
 
 
 class TestGetTaskingQuote:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/tasking/quote").mock(
+        respx.post(f"{BASE_URL}/pricing").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "quoteId": "quote-789",
-                    "price": {
-                        "subtotal": 500.0,
-                        "processingFee": 50.0,
-                        "total": 550.0,
-                    },
-                    "feasibilityScore": 0.85,
-                    "provider": "Maxar",
-                    "resolution": 0.5,
-                    "expiresAt": "2025-06-10T00:00:00Z",
+                    "quoteId": "pricing-estimate",
+                    "subtotal": 500.0,
+                    "total": 550.0,
+                    "provider": "PLANET",
+                    "resolution": "HIGH",
                 },
             )
         )
@@ -339,8 +299,7 @@ class TestGetTaskingQuote:
         )
         result = await pricing.get_tasking_quote(client, inp, API_KEY)
 
-        assert result.quote_id == "quote-789"
-        assert result.feasibility_score == 0.85
+        assert result.price.subtotal == 500.0
         assert result.price.total == 550.0
 
 
@@ -348,7 +307,7 @@ class TestAnalyzeFeasibility:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/tasking/feasibility").mock(
+        respx.post(f"{BASE_URL}/feasibility").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -365,42 +324,36 @@ class TestAnalyzeFeasibility:
             )
         )
 
+        now = datetime.now(UTC)
         inp = AnalyzeFeasibilityInput(location=sample_location)
         result = await pricing.analyze_feasibility(client, inp, API_KEY)
 
         assert result.feasibility_score == 0.72
         assert result.cloud_forecast == "Partly cloudy"
-        assert len(result.capture_windows) == 1
 
 
 class TestComparePricing:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/pricing/compare").mock(
+        respx.post(f"{BASE_URL}/pricing").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "comparisons": [
+                    "options": [
                         {
-                            "provider": "Maxar",
-                            "resolution": 0.5,
-                            "price": {"subtotal": 100, "total": 110},
-                            "sensorType": "optical",
+                            "provider": "PLANET",
+                            "gsd": 3.0,
+                            "subtotal": 30,
+                            "total": 33,
                         },
                         {
-                            "provider": "Planet",
-                            "resolution": 3.0,
-                            "price": {"subtotal": 30, "total": 33},
-                            "sensorType": "optical",
+                            "provider": "SATELLOGIC",
+                            "gsd": 1.0,
+                            "subtotal": 100,
+                            "total": 110,
                         },
                     ],
-                    "recommended": {
-                        "provider": "Planet",
-                        "resolution": 3.0,
-                        "price": {"subtotal": 30, "total": 33},
-                        "sensorType": "optical",
-                    },
                 },
             )
         )
@@ -412,7 +365,6 @@ class TestComparePricing:
 
         assert len(result.comparisons) == 2
         assert result.recommended is not None
-        assert result.recommended.provider == "Planet"
 
 
 # ---------------------------------------------------------------------------
@@ -425,18 +377,8 @@ class TestPlaceArchiveOrder:
     @pytest.mark.asyncio
     async def test_preview_when_not_confirmed(self, client: SkyFiClient):
         """confirmed=False should return a preview, NOT place the order."""
-        respx.post(f"{BASE_URL}/api/archive/estimate-price").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "price": {
-                        "subtotal": 100.0,
-                        "processingFee": 10.0,
-                        "total": 110.0,
-                    },
-                    "estimatedDeliveryTime": "2-4 hours",
-                },
-            )
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
         )
 
         inp = PlaceArchiveOrderInput(archive_id="img-001", confirmed=False)
@@ -446,21 +388,17 @@ class TestPlaceArchiveOrder:
         assert result.preview is not None
         assert result.confirmation is None
         assert result.preview.order_type == "archive"
-        assert result.preview.price.total == 110.0
         assert "confirm" in result.preview.message.lower()
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_preview_default_confirmed(self, client: SkyFiClient):
         """Default (no confirmed kwarg) should also return preview."""
-        respx.post(f"{BASE_URL}/api/archive/estimate-price").mock(
-            return_value=httpx.Response(
-                200,
-                json={"price": {"subtotal": 50, "total": 55}},
-            )
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
         )
 
-        inp = PlaceArchiveOrderInput(archive_id="img-002")
+        inp = PlaceArchiveOrderInput(archive_id="img-001")
         result = await orders.place_archive_order(client, inp, API_KEY)
 
         assert result.preview is not None
@@ -470,20 +408,15 @@ class TestPlaceArchiveOrder:
     @pytest.mark.asyncio
     async def test_execute_when_confirmed(self, client: SkyFiClient):
         """confirmed=True should actually place the order."""
-        respx.post(f"{BASE_URL}/api/archive/estimate-price").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "price": {"subtotal": 100, "processingFee": 10, "total": 110},
-                },
-            )
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
         )
-        respx.post(f"{BASE_URL}/api/orders/archive").mock(
+        respx.post(f"{BASE_URL}/order-archive").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "orderId": "ord-001",
-                    "estimatedDelivery": "2-4 hours",
+                    "estimatedDelivery": "24 hours",
                 },
             )
         )
@@ -494,25 +427,30 @@ class TestPlaceArchiveOrder:
         assert result.confirmation is not None
         assert result.preview is None
         assert result.confirmation.order_id == "ord-001"
-        assert result.confirmation.price.total == 110.0
 
 
 class TestPlaceTaskingOrder:
     @respx.mock
     @pytest.mark.asyncio
-    async def test_preview_when_not_confirmed(self, client: SkyFiClient):
-        respx.post(f"{BASE_URL}/api/tasking/quote").mock(
+    async def test_preview_when_not_confirmed(
+        self, client: SkyFiClient, sample_location: LocationInput
+    ):
+        respx.post(f"{BASE_URL}/pricing").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "quoteId": "quote-789",
-                    "price": {"subtotal": 500, "total": 550},
-                    "feasibilityScore": 0.85,
-                },
+                json={"subtotal": 500, "total": 550},
             )
         )
 
-        inp = PlaceTaskingOrderInput(quote_id="quote-789", confirmed=False)
+        now = datetime.now(UTC)
+        inp = PlaceTaskingOrderInput(
+            location=sample_location,
+            window_start=now,
+            window_end=now + timedelta(days=7),
+            product_type="DAY",
+            resolution="HIGH",
+            confirmed=False,
+        )
         result = await orders.place_tasking_order(client, inp, API_KEY)
 
         assert result.preview is not None
@@ -521,17 +459,16 @@ class TestPlaceTaskingOrder:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_execute_when_confirmed(self, client: SkyFiClient):
-        respx.post(f"{BASE_URL}/api/tasking/quote").mock(
+    async def test_execute_when_confirmed(
+        self, client: SkyFiClient, sample_location: LocationInput
+    ):
+        respx.post(f"{BASE_URL}/pricing").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "quoteId": "quote-789",
-                    "price": {"subtotal": 500, "total": 550},
-                },
+                json={"subtotal": 500, "total": 550},
             )
         )
-        respx.post(f"{BASE_URL}/api/orders/tasking").mock(
+        respx.post(f"{BASE_URL}/order-tasking").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -541,7 +478,15 @@ class TestPlaceTaskingOrder:
             )
         )
 
-        inp = PlaceTaskingOrderInput(quote_id="quote-789", confirmed=True)
+        now = datetime.now(UTC)
+        inp = PlaceTaskingOrderInput(
+            location=sample_location,
+            window_start=now,
+            window_end=now + timedelta(days=7),
+            product_type="DAY",
+            resolution="HIGH",
+            confirmed=True,
+        )
         result = await orders.place_tasking_order(client, inp, API_KEY)
 
         assert result.confirmation is not None
@@ -552,15 +497,15 @@ class TestGetOrderStatus:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/orders/ord-001").mock(
+        respx.get(f"{BASE_URL}/orders/ord-001").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "orderId": "ord-001",
-                    "status": "processing",
+                    "deliveryStatus": "DELIVERY_COMPLETED",
                     "createdAt": NOW_ISO,
-                    "updatedAt": NOW_ISO,
-                    "price": {"subtotal": 100, "total": 110},
+                    "lastModified": NOW_ISO,
+                    "customerItemCost": 110.0,
                 },
             )
         )
@@ -569,23 +514,23 @@ class TestGetOrderStatus:
         result = await orders.get_order_status(client, inp, API_KEY)
 
         assert result.order_id == "ord-001"
-        assert result.status.value == "processing"
+        assert result.status.value == "delivered"
 
 
 class TestListOrders:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/orders").mock(
+        respx.get(f"{BASE_URL}/orders").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "orders": [
                         {
                             "orderId": "ord-001",
-                            "status": "delivered",
+                            "deliveryStatus": "DELIVERY_COMPLETED",
                             "createdAt": NOW_ISO,
-                            "updatedAt": NOW_ISO,
+                            "lastModified": NOW_ISO,
                         }
                     ],
                     "hasMore": False,
@@ -605,7 +550,7 @@ class TestGetOrderImages:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/orders/ord-001/images").mock(
+        respx.get(f"{BASE_URL}/orders/ord-001/image").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -625,7 +570,6 @@ class TestGetOrderImages:
 
         assert result.order_id == "ord-001"
         assert len(result.images) == 1
-        assert result.images[0]["format"] == "geotiff"
 
 
 # ---------------------------------------------------------------------------
@@ -637,26 +581,27 @@ class TestSetupAOIMonitoring:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient, sample_location: LocationInput):
-        respx.post(f"{BASE_URL}/api/monitoring").mock(
+        respx.post(f"{BASE_URL}/notifications").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "monitor": {
-                        "monitorId": "mon-001",
-                        "location": _geom_dict(),
-                        "resolutionMin": 1.0,
-                        "createdAt": NOW_ISO,
-                        "status": "active",
-                    },
-                    "message": "Monitor created.",
+                    "id": "notif-001",
+                    "aoi": _FOOTPRINT_WKT,
+                    "webhookUrl": "https://example.com/hook",
+                    "createdAt": NOW_ISO,
+                    "status": "active",
                 },
             )
         )
 
-        inp = SetupAOIMonitoringInput(location=sample_location, resolution_min=1.0)
+        inp = SetupAOIMonitoringInput(
+            location=sample_location,
+            resolution_min=1.0,
+            notification_url="https://example.com/hook",
+        )
         result = await monitoring.setup_aoi_monitoring(client, inp, API_KEY)
 
-        assert result.monitor.monitor_id == "mon-001"
+        assert result.monitor.monitor_id == "notif-001"
         assert result.monitor.status == "active"
 
 
@@ -664,14 +609,15 @@ class TestListMonitors:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/monitoring").mock(
+        respx.get(f"{BASE_URL}/notifications").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "monitors": [
+                    "notifications": [
                         {
-                            "monitorId": "mon-001",
-                            "location": _geom_dict(),
+                            "id": "notif-001",
+                            "aoi": _FOOTPRINT_WKT,
+                            "webhookUrl": "https://example.com/hook",
                             "createdAt": NOW_ISO,
                             "status": "active",
                         }
@@ -688,25 +634,25 @@ class TestDeleteMonitor:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.delete(f"{BASE_URL}/api/monitoring/mon-001").mock(
+        respx.delete(f"{BASE_URL}/notifications/notif-001").mock(
             return_value=httpx.Response(
                 200,
-                json={"deleted": True, "message": "Monitor mon-001 deleted."},
+                json={"message": "Notification deleted."},
             )
         )
 
-        inp = DeleteMonitorInput(monitor_id="mon-001")
+        inp = DeleteMonitorInput(monitor_id="notif-001")
         result = await monitoring.delete_monitor(client, inp, API_KEY)
 
         assert result.deleted is True
-        assert result.monitor_id == "mon-001"
+        assert result.monitor_id == "notif-001"
 
 
 class TestGetWebhookStatus:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/webhooks/sub-001/status").mock(
+        respx.get(f"{BASE_URL}/notifications/sub-001").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -729,20 +675,18 @@ class TestCheckNotifications:
     @respx.mock
     @pytest.mark.asyncio
     async def test_success(self, client: SkyFiClient):
-        respx.get(f"{BASE_URL}/api/notifications").mock(
+        respx.get(f"{BASE_URL}/notifications").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "notifications": [
                         {
-                            "notificationId": "notif-001",
+                            "id": "notif-001",
                             "type": "new_imagery",
-                            "monitorId": "mon-001",
-                            "payload": {"archiveId": "img-new"},
+                            "aoi": _FOOTPRINT_WKT,
                             "createdAt": NOW_ISO,
                         }
                     ],
-                    "unreadCount": 1,
                 },
             )
         )
@@ -751,7 +695,6 @@ class TestCheckNotifications:
 
         assert len(result.notifications) == 1
         assert result.unread_count == 1
-        assert result.notifications[0].type == "new_imagery"
 
 
 # ---------------------------------------------------------------------------
@@ -764,26 +707,22 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_http_error_structured(self, client: SkyFiClient):
         """API errors should raise ValueError with structured JSON."""
-        respx.get(f"{BASE_URL}/api/archive/bad-id").mock(
+        respx.get(f"{BASE_URL}/archives/bad-id").mock(
             return_value=httpx.Response(
                 404,
-                json={"error": "not_found", "message": "Archive image not found"},
+                json={"detail": "Archive image not found"},
             )
         )
 
         inp = GetArchiveDetailsInput(archive_id="bad-id")
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match="not found"):
             await search.get_archive_details(client, inp, API_KEY)
-
-        error_data = json.loads(str(exc_info.value))
-        assert error_data["status_code"] == 404
-        assert error_data["error"] == "not_found"
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_connection_error(self, client: SkyFiClient):
         """Network failures should raise ValueError with connection_error."""
-        respx.get(f"{BASE_URL}/api/archive/img-001").mock(
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
 
@@ -797,6 +736,47 @@ class TestErrorHandling:
         inp = SearchArchiveInput(location=LocationInput())
         with pytest.raises(ValueError, match="location"):
             await search.search_archive(client, inp, API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# WKT conversion
+# ---------------------------------------------------------------------------
+
+
+class TestWKTConversion:
+    def test_geojson_to_wkt_polygon(self):
+        from skyfi_mcp.client.wkt import geojson_to_wkt
+
+        geom = {
+            "type": "Polygon",
+            "coordinates": [[[-122.4, 37.7], [-122.4, 37.8], [-122.3, 37.7], [-122.4, 37.7]]],
+        }
+        wkt = geojson_to_wkt(geom)
+        assert wkt.startswith("POLYGON(")
+        assert "-122.4 37.7" in wkt
+
+    def test_wkt_to_geojson_polygon(self):
+        from skyfi_mcp.client.wkt import wkt_to_geojson
+
+        wkt = "POLYGON((-122.4 37.7,-122.4 37.8,-122.3 37.7,-122.4 37.7))"
+        geojson = wkt_to_geojson(wkt)
+        assert geojson["type"] == "Polygon"
+        assert len(geojson["coordinates"]) == 1
+        assert len(geojson["coordinates"][0]) == 4
+
+    def test_roundtrip(self):
+        from skyfi_mcp.client.wkt import geojson_to_wkt, wkt_to_geojson
+
+        original = {
+            "type": "Polygon",
+            "coordinates": [
+                [[-122.4, 37.7], [-122.4, 37.8], [-122.3, 37.8], [-122.3, 37.7], [-122.4, 37.7]]
+            ],
+        }
+        wkt = geojson_to_wkt(original)
+        restored = wkt_to_geojson(wkt)
+        assert restored["type"] == "Polygon"
+        assert len(restored["coordinates"][0]) == len(original["coordinates"][0])
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,12 @@ Monitoring & Notification tools.
 
 Provides AOI monitoring setup, monitor management, webhook status checks,
 and notification retrieval.
+
+Real API endpoints:
+  POST   /notifications            -- create notification filter
+  GET    /notifications            -- list notifications
+  GET    /notifications/{id}       -- notification details
+  DELETE /notifications/{id}       -- delete notification
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from interfaces import (
     SetupMonitorOutput,
     WebhookStatusOutput,
 )
+from skyfi_mcp.client.wkt import geojson_to_wkt, wkt_to_geojson
 
 if TYPE_CHECKING:
     from skyfi_mcp.client.skyfi import SkyFiClient
@@ -30,24 +37,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _location_dict(loc: Any) -> dict[str, Any]:
-    """Convert a LocationInput to a plain dict."""
-    payload: dict[str, Any] = {}
-    if loc.geometry is not None:
-        payload["geometry"] = loc.geometry.model_dump()
-    if loc.address is not None:
-        payload["address"] = loc.address
-    return payload
+def _parse_notification_as_monitor(raw: dict[str, Any]) -> MonitorInfo:
+    """Parse a notification object from the API into a MonitorInfo model."""
+    # The API stores notifications with aoi as WKT; convert to GeoJSON
+    aoi_wkt = raw.get("aoi", "")
+    if aoi_wkt:
+        geom = GeoJSONGeometry(**wkt_to_geojson(aoi_wkt))
+    else:
+        geom = GeoJSONGeometry(type="Polygon", coordinates=[])
 
-
-def _parse_monitor(raw: dict[str, Any]) -> MonitorInfo:
-    """Parse a MonitorInfo from raw API JSON."""
     return MonitorInfo(
-        monitor_id=raw["monitorId"],
-        location=GeoJSONGeometry(**raw["location"]),
-        resolution_min=raw.get("resolutionMin"),
-        notification_url=raw.get("notificationUrl"),
-        created_at=raw["createdAt"],
+        monitor_id=str(raw.get("id", raw.get("notificationId", ""))),
+        location=geom,
+        resolution_min=raw.get("gsdMin"),
+        notification_url=raw.get("webhookUrl"),
+        created_at=raw.get("createdAt", raw.get("created_at", "")),
         status=raw.get("status", "active"),
     )
 
@@ -57,17 +61,26 @@ async def setup_aoi_monitoring(
     input: SetupAOIMonitoringInput,
     api_key: str,
 ) -> SetupMonitorOutput:
-    """Create an AOI monitor for new imagery notifications."""
-    location = _location_dict(input.location)
+    """Create an AOI notification for new imagery.
 
-    raw = await client.setup_monitoring(
-        api_key,
-        location=location,
-        resolution_min=input.resolution_min,
-        notification_url=input.notification_url,
-    )
+    Uses POST /notifications which requires ``aoi`` (WKT) and
+    ``webhookUrl``.
+    """
+    if input.location.geometry is None:
+        raise ValueError("A geometry is required for monitoring setup.")
 
-    monitor = _parse_monitor(raw.get("monitor", raw))
+    aoi = geojson_to_wkt(input.location.geometry.model_dump())
+
+    body: dict[str, Any] = {
+        "aoi": aoi,
+        "webhookUrl": input.notification_url or "https://example.com/webhook",
+    }
+    if input.resolution_min is not None:
+        body["gsdMin"] = int(input.resolution_min)
+
+    raw = await client.create_notification(api_key, body=body)
+
+    monitor = _parse_notification_as_monitor(raw)
 
     return SetupMonitorOutput(
         monitor=monitor,
@@ -79,12 +92,17 @@ async def list_monitors(
     client: SkyFiClient,
     api_key: str,
 ) -> ListMonitorsOutput:
-    """List all active AOI monitors."""
-    raw = await client.list_monitors(api_key)
+    """List all active notifications (monitors)."""
+    raw = await client.list_notifications(api_key)
+
+    # Response may be a list directly or under a key
+    items = raw if isinstance(raw, list) else raw.get("notifications", raw.get("items", []))
+    if isinstance(items, dict):
+        items = [items]
 
     monitors: list[MonitorInfo] = []
-    for item in raw.get("monitors", []):
-        monitors.append(_parse_monitor(item))
+    for item in items:
+        monitors.append(_parse_notification_as_monitor(item))
 
     return ListMonitorsOutput(monitors=monitors)
 
@@ -94,12 +112,12 @@ async def delete_monitor(
     input: DeleteMonitorInput,
     api_key: str,
 ) -> DeleteMonitorOutput:
-    """Delete an AOI monitor."""
-    raw = await client.delete_monitor(api_key, monitor_id=input.monitor_id)
+    """Delete an active notification (monitor)."""
+    raw = await client.delete_notification(api_key, notification_id=input.monitor_id)
 
     return DeleteMonitorOutput(
         monitor_id=input.monitor_id,
-        deleted=raw.get("deleted", True),
+        deleted=True,
         message=raw.get("message", f"Monitor {input.monitor_id} deleted."),
     )
 
@@ -109,14 +127,16 @@ async def get_webhook_status(
     input: GetWebhookStatusInput,
     api_key: str,
 ) -> WebhookStatusOutput:
-    """Check the status of a webhook subscription."""
-    raw = await client.get_webhook_status(
-        api_key, subscription_id=input.subscription_id
-    )
+    """Check the status of a notification (webhook subscription).
+
+    Uses GET /notifications/{id} since there's no dedicated webhook
+    status endpoint.
+    """
+    raw = await client.get_notification(api_key, notification_id=input.subscription_id)
 
     return WebhookStatusOutput(
         subscription_id=input.subscription_id,
-        status=raw.get("status", "unknown"),
+        status=raw.get("status", "active"),
         last_delivery_at=raw.get("lastDeliveryAt"),
         delivery_count=raw.get("deliveryCount", 0),
         failure_count=raw.get("failureCount", 0),
@@ -127,22 +147,26 @@ async def check_notifications(
     client: SkyFiClient,
     api_key: str,
 ) -> CheckNotificationsOutput:
-    """Retrieve unread notifications."""
-    raw = await client.check_notifications(api_key)
+    """Retrieve notifications (same as list_notifications)."""
+    raw = await client.list_notifications(api_key)
+
+    items = raw if isinstance(raw, list) else raw.get("notifications", raw.get("items", []))
+    if isinstance(items, dict):
+        items = [items]
 
     notifications: list[Notification] = []
-    for item in raw.get("notifications", []):
+    for item in items:
         notifications.append(
             Notification(
-                notification_id=item["notificationId"],
-                type=item.get("type", "unknown"),
-                monitor_id=item.get("monitorId"),
-                payload=item.get("payload", {}),
-                created_at=item["createdAt"],
+                notification_id=str(item.get("id", item.get("notificationId", ""))),
+                type=item.get("type", "notification"),
+                monitor_id=str(item.get("id", "")),
+                payload=item,
+                created_at=item.get("createdAt", item.get("created_at", "")),
             )
         )
 
     return CheckNotificationsOutput(
         notifications=notifications,
-        unread_count=raw.get("unreadCount", len(notifications)),
+        unread_count=len(notifications),
     )

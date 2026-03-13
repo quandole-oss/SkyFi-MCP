@@ -101,7 +101,7 @@ mcp = FastMCP("skyfi_mcp")
 # Load config and create clients once at import time.
 _config = load_config()
 _api_key: str = _config.api_key
-_skyfi_client = SkyFiClient()
+_skyfi_client = SkyFiClient(base_url=_config.api_base_url, auth_header=_config.auth_header)
 _osm_client = OSMClient()
 
 
@@ -350,19 +350,28 @@ async def place_archive_order(
 @mcp.tool(
     name="place_tasking_order",
     description=(
-        "Place a tasking order using a quote ID from get_tasking_quote. "
+        "Place a tasking order for new satellite imagery capture. "
+        "Requires location, capture window, product type, and resolution. "
         "Requires two-step confirmation: call first with confirmed=false "
-        "to review, then with confirmed=true to execute."
+        "to review the price, then with confirmed=true to execute."
     ),
     annotations=_DESTRUCTIVE,
 )
 async def place_tasking_order(
-    quote_id: str,
+    location: dict[str, Any],
+    window_start: str,
+    window_end: str,
+    product_type: str = "DAY",
+    resolution: str = "HIGH",
     confirmed: bool = False,
 ) -> dict[str, Any]:
     """Place a tasking order (requires human confirmation)."""
     input_model = PlaceTaskingOrderInput(
-        quote_id=quote_id,
+        location=_build_location(location),
+        window_start=window_start,
+        window_end=window_end,
+        product_type=product_type,
+        resolution=resolution,
         confirmed=confirmed,
     )
     result = await order_tools.place_tasking_order(_skyfi_client, input_model, _api_key)

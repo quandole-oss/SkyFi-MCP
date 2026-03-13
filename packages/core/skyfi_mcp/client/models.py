@@ -92,14 +92,14 @@ class SkyFiAPIError(BaseModel):
 
 
 class SkyFiSearchResponse(BaseModel):
-    """Raw response shape from POST /api/archive/search."""
+    """Raw response shape from POST /archives."""
 
-    results: list[dict[str, Any]] = Field(default_factory=list)
+    archives: list[dict[str, Any]] = Field(default_factory=list)
     next_page: str | None = Field(
-        None, alias="nextPage", description="Opaque pagination cursor from SkyFi.",
+        None, alias="nextPage", description="Pagination URL from SkyFi.",
     )
-    total_count: int | None = Field(
-        None, alias="totalCount", description="Total matching results if provided.",
+    total: int | None = Field(
+        None, description="Total matching results if provided.",
     )
 
 

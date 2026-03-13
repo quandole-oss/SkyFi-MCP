@@ -10,6 +10,14 @@ class ServerConfig:
 
     def __init__(self) -> None:
         self.api_key = self._require_env("SKYFI_API_KEY")
+        self.api_base_url = (
+            os.environ.get("SKYFI_API_BASE_URL")
+            or "https://app.skyfi.com/platform-api"
+        )
+        self.auth_header = (
+            os.environ.get("SKYFI_AUTH_HEADER")
+            or "X-Skyfi-Api-Key"
+        )
 
     @staticmethod
     def _require_env(name: str) -> str:

@@ -188,7 +188,11 @@ export class SkyFiMCP extends DurableObject<Env> {
     // Extract props from header (set by the Worker's handleMcp)
     const propsHeader = request.headers.get("X-MCP-Props");
     if (propsHeader) {
-      this.props = JSON.parse(propsHeader) as Props;
+      try {
+        this.props = JSON.parse(propsHeader) as Props;
+      } catch {
+        // Malformed header — shouldn't happen since we control both sides
+      }
     }
 
     // Require API key
@@ -203,17 +207,29 @@ export class SkyFiMCP extends DurableObject<Env> {
       );
     }
 
-    // Lazy init: create transport, register tools, connect server
-    if (!this.initialized) {
-      this.transport = new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: () => this.ctx.id.toString(),
-      });
-      await this.init();
-      await this.server.connect(this.transport);
-      this.initialized = true;
-    }
+    try {
+      // Lazy init: create transport, register tools, connect server
+      if (!this.initialized) {
+        this.transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: () => this.ctx.id.toString(),
+        });
+        await this.init();
+        await this.server.connect(this.transport);
+        this.initialized = true;
+      }
 
-    return this.transport!.handleRequest(request);
+      return await this.transport!.handleRequest(request);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: `Internal error: ${message}` },
+          id: null,
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
   }
 
   /** Handle POST /_internal/notify — store an incoming webhook notification. */

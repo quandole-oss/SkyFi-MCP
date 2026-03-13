@@ -30,7 +30,8 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Skyfi-Api-Key, X-Skyfi-Signature",
+    "Content-Type, Authorization, Accept, X-Skyfi-Api-Key, X-Skyfi-Signature, Mcp-Session-Id, Mcp-Protocol-Version",
+  "Access-Control-Expose-Headers": "Mcp-Session-Id",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -236,6 +237,38 @@ async function handleMcp(
   env: Env,
   props: Props,
 ): Promise<Response> {
+  // For POST requests, validate Content-Type and pre-parse the JSON body
+  // at the edge so malformed requests never reach the Durable Object.
+  let validatedBody: string | null = null;
+
+  if (request.method === "POST") {
+    const contentType = request.headers.get("Content-Type");
+    if (!contentType?.includes("application/json")) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Unsupported Media Type: Content-Type must be application/json" },
+          id: null,
+        }),
+        { status: 415, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    try {
+      const body = await request.json();
+      validatedBody = JSON.stringify(body);
+    } catch {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32700, message: "Parse error: Invalid JSON" },
+          id: null,
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+  }
+
   // Use the API key as the Durable Object ID so each user gets their own
   // session-scoped instance.  Hash it to keep the key out of the DO name.
   const hashHex = await sha256Hex(props.skyfiApiKey);
@@ -255,7 +288,7 @@ async function handleMcp(
   const doRequest = new Request(request.url, {
     method: request.method,
     headers,
-    body: request.body,
+    body: validatedBody,
   });
 
   return stub.fetch(doRequest);

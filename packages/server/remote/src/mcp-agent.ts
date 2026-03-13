@@ -81,12 +81,6 @@ const CREATE = {
 };
 
 // ---------------------------------------------------------------------------
-// Helper: call a tool via the Python proxy
-// ---------------------------------------------------------------------------
-
-type ToolCallbackExtra = { toolName: string };
-
-// ---------------------------------------------------------------------------
 // SkyFiMCP Durable Object
 // ---------------------------------------------------------------------------
 
@@ -102,7 +96,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
 
   /** Ensure the notifications table exists (idempotent). */
   private initNotificationsTable(): void {
-    this.sql.exec(`
+    this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS notifications (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL,
@@ -125,7 +119,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
     monitorId: string;
     payload: Record<string, unknown>;
   }): void {
-    this.sql.exec(
+    this.ctx.storage.sql.exec(
       `INSERT OR REPLACE INTO notifications (id, type, monitor_id, payload, created_at, read)
        VALUES (?, ?, ?, ?, ?, 0)`,
       notification.id,
@@ -138,7 +132,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
 
   /** Read unread notifications, optionally limited. */
   private getUnreadNotifications(limit: number = 50): StoredNotification[] {
-    return this.sql
+    return this.ctx.storage.sql
       .exec<StoredNotification>(
         `SELECT id, type, monitor_id, payload, created_at, read
          FROM notifications
@@ -155,7 +149,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
     if (ids.length === 0) return 0;
     // Build placeholders
     const placeholders = ids.map(() => "?").join(",");
-    const result = this.sql.exec(
+    const result = this.ctx.storage.sql.exec(
       `UPDATE notifications SET read = 1 WHERE id IN (${placeholders})`,
       ...ids,
     );
@@ -164,7 +158,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
 
   /** Mark all unread notifications as read. */
   private markAllNotificationsRead(): number {
-    const result = this.sql.exec(
+    const result = this.ctx.storage.sql.exec(
       `UPDATE notifications SET read = 1 WHERE read = 0`,
     );
     return result.rowsWritten;
@@ -266,7 +260,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       const result = await proxyToolCall(this.env.SKYFI_API_BASE_URL, {
         toolName,
         input,
-        apiKey: this.props.skyfiApiKey,
+        apiKey: this.props!.skyfiApiKey,
       });
 
       if (!result.ok) {
@@ -315,8 +309,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         open_data: z.boolean().optional().describe("Only free/open-data results"),
         page_token: z.string().optional().describe("Pagination token"),
       },
+      READ_ONLY,
       async (input) => proxy("search_archive", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -325,8 +319,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         archive_id: z.string().describe("Unique archive image identifier"),
       },
+      READ_ONLY,
       async (input) => proxy("get_archive_details", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -339,8 +333,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .optional()
           .describe("Sensor type filter"),
       },
+      READ_ONLY,
       async (input) => proxy("explore_providers", input),
-      { annotations: READ_ONLY },
     );
 
     // -----------------------------------------------------------------------
@@ -354,8 +348,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         archive_id: z.string().describe("Archive image ID to price"),
         delivery_options: DeliveryOptionsSchema.optional(),
       },
+      READ_ONLY,
       async (input) => proxy("estimate_archive_price", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -369,8 +363,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .optional(),
         time_window: DateRangeSchema.optional().describe("Acceptable capture window"),
       },
+      READ_ONLY_NON_IDEMPOTENT,
       async (input) => proxy("get_tasking_quote", input),
-      { annotations: READ_ONLY_NON_IDEMPOTENT },
     );
 
     this.server.tool(
@@ -381,8 +375,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         time_window: DateRangeSchema.optional(),
         resolution: z.number().optional().describe("Target resolution in meters"),
       },
+      READ_ONLY_NON_IDEMPOTENT,
       async (input) => proxy("analyze_feasibility", input),
-      { annotations: READ_ONLY_NON_IDEMPOTENT },
     );
 
     this.server.tool(
@@ -394,8 +388,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .array(z.number())
           .describe("Resolution values in meters to compare"),
       },
+      READ_ONLY,
       async (input) => proxy("compare_pricing", input),
-      { annotations: READ_ONLY },
     );
 
     // -----------------------------------------------------------------------
@@ -413,8 +407,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .default(false)
           .describe("Must be true to execute the order"),
       },
+      DESTRUCTIVE,
       async (input) => proxy("place_archive_order", input),
-      { annotations: DESTRUCTIVE },
     );
 
     this.server.tool(
@@ -427,8 +421,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .default(false)
           .describe("Must be true to execute the order"),
       },
+      DESTRUCTIVE,
       async (input) => proxy("place_tasking_order", input),
-      { annotations: DESTRUCTIVE },
     );
 
     this.server.tool(
@@ -437,8 +431,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         order_id: z.string().describe("Order ID to check"),
       },
+      READ_ONLY,
       async (input) => proxy("get_order_status", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -452,8 +446,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         date_range: DateRangeSchema.optional(),
         page: z.number().int().min(1).default(1).describe("Page number (1-indexed)"),
       },
+      READ_ONLY,
       async (input) => proxy("list_orders", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -462,8 +456,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         order_id: z.string().describe("Order ID to fetch imagery for"),
       },
+      READ_ONLY,
       async (input) => proxy("get_order_images", input),
-      { annotations: READ_ONLY },
     );
 
     // -----------------------------------------------------------------------
@@ -478,16 +472,16 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         resolution_min: z.number().optional().describe("Minimum resolution threshold"),
         notification_url: z.string().optional().describe("Webhook URL for push notifications"),
       },
+      CREATE,
       async (input) => proxy("setup_aoi_monitoring", input),
-      { annotations: CREATE },
     );
 
     this.server.tool(
       "list_monitors",
       "List all active AOI monitors on your account.",
       {},
+      READ_ONLY,
       async (input) => proxy("list_monitors", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -496,8 +490,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         monitor_id: z.string().describe("Monitor ID to remove"),
       },
+      DESTRUCTIVE,
       async (input) => proxy("delete_monitor", input),
-      { annotations: DESTRUCTIVE },
     );
 
     this.server.tool(
@@ -506,8 +500,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         subscription_id: z.string().describe("Webhook subscription ID"),
       },
+      READ_ONLY,
       async (input) => proxy("get_webhook_status", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -517,6 +511,7 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         limit: z.number().int().min(1).max(100).default(20).describe("Max notifications to return"),
         mark_read: z.boolean().default(false).describe("Mark returned notifications as read"),
       },
+      READ_ONLY_NON_IDEMPOTENT,
       async (input) => {
         // Read from local DO SQLite queue instead of proxying to Python
         const notifications = this.getUnreadNotifications(input.limit);
@@ -547,7 +542,6 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           ],
         };
       },
-      { annotations: READ_ONLY_NON_IDEMPOTENT },
     );
 
     // -----------------------------------------------------------------------
@@ -560,8 +554,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
       {
         query: z.string().describe("Address or place name to geocode"),
       },
+      READ_ONLY,
       async (input) => proxy("geocode", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -571,8 +565,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
         lat: z.number().min(-90).max(90).describe("Latitude"),
         lon: z.number().min(-180).max(180).describe("Longitude"),
       },
+      READ_ONLY,
       async (input) => proxy("reverse_geocode", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -601,8 +595,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .default(1000)
           .describe("Search radius in meters"),
       },
+      READ_ONLY,
       async (input) => proxy("search_pois", input),
-      { annotations: READ_ONLY },
     );
 
     this.server.tool(
@@ -618,8 +612,8 @@ export class SkyFiMCP extends McpAgent<Env, {}, Props> {
           .optional()
           .describe("OSM admin level (2=country, 4=state, 6=county, 8=city)"),
       },
+      READ_ONLY,
       async (input) => proxy("get_area_boundary", input),
-      { annotations: READ_ONLY },
     );
   }
 }

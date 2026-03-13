@@ -68,7 +68,7 @@ class SkyFiClient:
                 return [_scrub(item) for item in obj]
             return obj
 
-        return _scrub(data)  # type: ignore[return-value]
+        return _scrub(data)  # type: ignore[no-any-return]
 
     async def _request(
         self,

@@ -20,6 +20,7 @@ export interface Env {
 export interface Props {
   /** The user's SkyFi API key, extracted from token claims during OAuth flow. */
   skyfiApiKey: string;
+  [key: string]: unknown;
 }
 
 /** JWT payload embedded in access tokens issued by /token. */
@@ -40,6 +41,7 @@ export interface StoredNotification {
   payload: string;
   created_at: string;
   read: number;
+  [key: string]: string | number;
 }
 
 /** Incoming webhook payload from SkyFi. */

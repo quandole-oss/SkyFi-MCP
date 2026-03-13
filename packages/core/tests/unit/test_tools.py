@@ -12,16 +12,17 @@ Covers:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 import respx
+from skyfi_mcp.client.skyfi import SkyFiClient
+from skyfi_mcp.tools import monitoring, orders, pricing, search
 
 from interfaces import (
     AnalyzeFeasibilityInput,
     ComparePricingInput,
-    DateRange,
     DeleteMonitorInput,
     DeliveryFormat,
     DeliveryOptions,
@@ -37,13 +38,11 @@ from interfaces import (
     LocationInput,
     PlaceArchiveOrderInput,
     PlaceTaskingOrderInput,
+    PriceBreakdown,
     SearchArchiveInput,
     SensorType,
     SetupAOIMonitoringInput,
 )
-
-from skyfi_mcp.client.skyfi import SkyFiClient
-from skyfi_mcp.tools import monitoring, orders, pricing, search
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -53,7 +52,7 @@ BASE_URL = "https://test.skyfi.local/platform-api"
 API_KEY = "test-api-key-do-not-use"
 
 NOW_ISO = "2025-06-01T12:00:00Z"
-NOW_DT = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW_DT = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -849,7 +848,3 @@ class TestConfirmationHelpers:
         assert result.confirmation is not None
         assert result.preview is None
         assert result.confirmation.order_id == "ord-001"
-
-
-# Need to import PriceBreakdown for the confirmation tests
-from interfaces import PriceBreakdown

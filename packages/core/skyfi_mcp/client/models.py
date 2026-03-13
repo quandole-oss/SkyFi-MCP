@@ -10,9 +10,15 @@ This module also defines internal-only models used by the API clients.
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
+# Internal-only models (used by API clients, not exposed as tool I/O)
+# ---------------------------------------------------------------------------
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
 # Re-export everything from interfaces
 # ---------------------------------------------------------------------------
-
 from interfaces import (
     AnalyzeFeasibilityInput,
     ArchiveDetailsOutput,
@@ -31,14 +37,15 @@ from interfaces import (
     ExploreProvidersInput,
     ExploreProvidersOutput,
     FeasibilityAnalysis,
-    GeoJSONGeometry,
     GeocodeInput,
     GeocodeOutput,
     GeocodeResult,
+    GeoJSONGeometry,
     GetArchiveDetailsInput,
     GetAreaBoundaryInput,
     GetOrderImagesInput,
     GetOrderStatusInput,
+    GetTaskingQuoteInput,
     GetWebhookStatusInput,
     ListMonitorsOutput,
     ListOrdersInput,
@@ -51,12 +58,12 @@ from interfaces import (
     OrderImagesOutput,
     OrderStatus,
     OrderStatusOutput,
-    POICategory,
-    POIResult,
     PaginationInfo,
     PlaceArchiveOrderInput,
     PlaceOrderOutput,
     PlaceTaskingOrderInput,
+    POICategory,
+    POIResult,
     PriceBreakdown,
     PricingComparison,
     ProviderInfo,
@@ -70,18 +77,9 @@ from interfaces import (
     SensorType,
     SetupAOIMonitoringInput,
     SetupMonitorOutput,
-    GetTaskingQuoteInput,
     TaskingQuoteOutput,
     WebhookStatusOutput,
 )
-
-# ---------------------------------------------------------------------------
-# Internal-only models (used by API clients, not exposed as tool I/O)
-# ---------------------------------------------------------------------------
-
-from typing import Any
-
-from pydantic import BaseModel, Field
 
 
 class SkyFiAPIError(BaseModel):
@@ -97,8 +95,12 @@ class SkyFiSearchResponse(BaseModel):
     """Raw response shape from POST /api/archive/search."""
 
     results: list[dict[str, Any]] = Field(default_factory=list)
-    nextPage: str | None = Field(None, description="Opaque pagination cursor from SkyFi.")
-    totalCount: int | None = Field(None, description="Total matching results if provided.")
+    next_page: str | None = Field(
+        None, alias="nextPage", description="Opaque pagination cursor from SkyFi.",
+    )
+    total_count: int | None = Field(
+        None, alias="totalCount", description="Total matching results if provided.",
+    )
 
 
 class OSMNominatimResult(BaseModel):

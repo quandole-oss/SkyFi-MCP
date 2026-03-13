@@ -12,10 +12,9 @@ default), a preview is returned instead. Orders are NEVER auto-confirmed.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from interfaces import (
-    DeliveryOptions,
     GetOrderImagesInput,
     GetOrderStatusInput,
     ListOrdersInput,
@@ -30,7 +29,8 @@ from interfaces import (
     PriceBreakdown,
 )
 
-from skyfi_mcp.client.skyfi import SkyFiClient
+if TYPE_CHECKING:
+    from skyfi_mcp.client.skyfi import SkyFiClient
 from skyfi_mcp.confirmation import (
     build_archive_order_preview,
     build_order_confirmation,

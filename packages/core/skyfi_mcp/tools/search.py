@@ -8,7 +8,7 @@ and provider exploration.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from interfaces import (
     ArchiveDetailsOutput,
@@ -24,12 +24,15 @@ from interfaces import (
     SensorType,
 )
 
-from skyfi_mcp.client.skyfi import SkyFiClient
+if TYPE_CHECKING:
+    from skyfi_mcp.client.skyfi import SkyFiClient
 
 logger = logging.getLogger(__name__)
 
 
-def _location_payload(input_model: SearchArchiveInput | ExploreProvidersInput) -> dict[str, Any] | None:
+def _location_payload(
+    input_model: SearchArchiveInput | ExploreProvidersInput,
+) -> dict[str, Any] | None:
     """Convert a LocationInput to the dict expected by the SkyFi client."""
     loc = getattr(input_model, "location", None)
     if loc is None:

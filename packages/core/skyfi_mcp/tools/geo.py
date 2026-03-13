@@ -7,6 +7,8 @@ lookup via the Nominatim and Overpass APIs.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from interfaces import (
     AreaBoundaryOutput,
     GeocodeInput,
@@ -18,12 +20,13 @@ from interfaces import (
     SearchPOIsOutput,
 )
 
-from skyfi_mcp.client.osm import OSMClient
+if TYPE_CHECKING:
+    from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.validation import (
+    MAX_AREA_NAME_LENGTH,
     validate_address,
     validate_geojson_geometry,
     validate_string_length,
-    MAX_AREA_NAME_LENGTH,
 )
 
 

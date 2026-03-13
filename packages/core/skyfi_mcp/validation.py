@@ -116,7 +116,10 @@ def validate_geojson_geometry(geometry: Any) -> None:
         geo_type = geometry.get("type")
         coordinates = geometry.get("coordinates")
     else:
-        raise ValidationError(f"Geometry must be a dict or object with type/coordinates, got {type(geometry).__name__}")
+        raise ValidationError(
+            "Geometry must be a dict or object with type/coordinates, "
+            f"got {type(geometry).__name__}"
+        )
 
     if geo_type not in _VALID_GEOJSON_TYPES:
         raise ValidationError(

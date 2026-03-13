@@ -8,7 +8,7 @@ and notification retrieval.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from interfaces import (
     CheckNotificationsOutput,
@@ -24,7 +24,8 @@ from interfaces import (
     WebhookStatusOutput,
 )
 
-from skyfi_mcp.client.skyfi import SkyFiClient
+if TYPE_CHECKING:
+    from skyfi_mcp.client.skyfi import SkyFiClient
 
 logger = logging.getLogger(__name__)
 

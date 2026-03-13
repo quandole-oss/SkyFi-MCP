@@ -114,11 +114,11 @@ class DeliveryOptions(BaseModel):
     """Options for imagery delivery."""
 
     format: DeliveryFormat = Field(
-        DeliveryFormat.GEOTIFF,
+        default=DeliveryFormat.GEOTIFF,
         description="Desired delivery format.",
     )
     projection: str = Field(
-        "EPSG:4326",
+        default="EPSG:4326",
         description="Target coordinate reference system.",
     )
 

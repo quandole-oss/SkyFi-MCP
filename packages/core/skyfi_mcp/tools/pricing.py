@@ -8,7 +8,7 @@ and cross-provider pricing comparison.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from interfaces import (
     AnalyzeFeasibilityInput,
@@ -26,7 +26,8 @@ from interfaces import (
     TaskingQuoteOutput,
 )
 
-from skyfi_mcp.client.skyfi import SkyFiClient
+if TYPE_CHECKING:
+    from skyfi_mcp.client.skyfi import SkyFiClient
 
 logger = logging.getLogger(__name__)
 

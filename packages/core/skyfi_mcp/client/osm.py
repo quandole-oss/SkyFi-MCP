@@ -16,9 +16,9 @@ import httpx
 
 from skyfi_mcp.client.models import (
     AreaBoundaryOutput,
-    GeoJSONGeometry,
     GeocodeOutput,
     GeocodeResult,
+    GeoJSONGeometry,
     POICategory,
     POIResult,
     ReverseGeocodeOutput,

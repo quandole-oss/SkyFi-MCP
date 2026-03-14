@@ -36,6 +36,7 @@ Thumbs.db
 .env.*
 !.env.example
 credentials.json
+.mcp.json
 
 # Testing
 .pytest_cache/

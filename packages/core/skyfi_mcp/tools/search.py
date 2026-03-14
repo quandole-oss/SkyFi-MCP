@@ -134,7 +134,7 @@ async def search_archive(
         if aoi is None:
             raise ValueError("A location (geometry or address) is required for archive search.")
 
-        body: dict[str, Any] = {"aoi": aoi}
+        body: dict[str, Any] = {"aoi": aoi, "pageSize": 10}
 
         if input.date_range is not None:
             body["fromDate"] = input.date_range.start.isoformat()

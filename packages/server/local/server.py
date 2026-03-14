@@ -121,6 +121,11 @@ def _build_location(location: dict[str, Any]) -> LocationInput:
     # If top-level has type+coordinates, treat as geometry directly
     if "type" in location and "coordinates" in location and geometry is None:
         geometry = GeoJSONGeometry(type=location["type"], coordinates=location["coordinates"])
+    # Handle plain {"lat": ..., "lon": ...} dicts (LLMs frequently use this format)
+    if geometry is None and "lat" in location and "lon" in location:
+        geometry = GeoJSONGeometry(
+            type="Point", coordinates=[float(location["lon"]), float(location["lat"])]
+        )
     # Validate GeoJSON geometry coordinates
     if geometry is not None:
         validate_geojson_geometry(geometry)

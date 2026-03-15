@@ -269,6 +269,10 @@ class PlaceArchiveOrderInput(BaseModel):
             "preview and requires the user to confirm before proceeding."
         ),
     )
+    webhook_url: str | None = Field(
+        None,
+        description="Optional callback URL for order status updates. SkyFi will POST to this URL on every status change.",
+    )
 
 
 class PlaceTaskingOrderInput(BaseModel):
@@ -300,6 +304,10 @@ class PlaceTaskingOrderInput(BaseModel):
             "Must be true to execute the order. If false or omitted, returns a price "
             "preview and requires the user to confirm."
         ),
+    )
+    webhook_url: str | None = Field(
+        None,
+        description="Optional callback URL for order status updates. SkyFi will POST to this URL on every status change.",
     )
 
 

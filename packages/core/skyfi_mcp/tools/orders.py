@@ -134,6 +134,8 @@ async def place_archive_order(
     if input.delivery_options is not None:
         # Map delivery options to API format
         body["deliveryDriver"] = "NONE"
+    if input.webhook_url:
+        body["webhook_url"] = input.webhook_url
 
     order_raw = await client.place_archive_order(api_key, body=body)
 
@@ -184,6 +186,8 @@ async def place_tasking_order(
         "productType": input.product_type,
         "resolution": input.resolution,
     }
+    if input.webhook_url:
+        body["webhook_url"] = input.webhook_url
     order_raw = await client.place_tasking_order(api_key, body=body)
 
     return build_order_confirmation(

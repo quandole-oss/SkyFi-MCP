@@ -341,12 +341,14 @@ async def place_archive_order(
     archive_id: str,
     delivery_options: dict[str, Any] | None = None,
     confirmed: bool = False,
+    webhook_url: str | None = None,
 ) -> dict[str, Any]:
     """Place an archive order (requires human confirmation)."""
     input_model = PlaceArchiveOrderInput(
         archive_id=archive_id,
         delivery_options=_build_delivery_options(delivery_options),
         confirmed=confirmed,
+        webhook_url=webhook_url,
     )
     result = await order_tools.place_archive_order(_skyfi_client, input_model, _api_key)
     return _to_dict(result)
@@ -369,6 +371,7 @@ async def place_tasking_order(
     product_type: str = "DAY",
     resolution: str = "HIGH",
     confirmed: bool = False,
+    webhook_url: str | None = None,
 ) -> dict[str, Any]:
     """Place a tasking order (requires human confirmation)."""
     input_model = PlaceTaskingOrderInput(
@@ -378,6 +381,7 @@ async def place_tasking_order(
         product_type=product_type,
         resolution=resolution,
         confirmed=confirmed,
+        webhook_url=webhook_url,
     )
     result = await order_tools.place_tasking_order(_skyfi_client, input_model, _api_key)
     return _to_dict(result)

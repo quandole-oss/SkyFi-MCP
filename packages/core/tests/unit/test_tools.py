@@ -14,7 +14,6 @@ as documented at https://app.skyfi.com/platform-api/openapi.json.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -324,7 +323,6 @@ class TestAnalyzeFeasibility:
             )
         )
 
-        now = datetime.now(UTC)
         inp = AnalyzeFeasibilityInput(location=sample_location)
         result = await pricing.analyze_feasibility(client, inp, API_KEY)
 

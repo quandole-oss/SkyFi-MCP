@@ -602,6 +602,34 @@ class TestSetupAOIMonitoring:
         assert result.monitor.monitor_id == "notif-001"
         assert result.monitor.status == "active"
 
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_webhook_url(self, client: SkyFiClient, sample_location: LocationInput):
+        """When no notification_url is provided, webhookUrl should not be in the body."""
+        route = respx.post(f"{BASE_URL}/notifications").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "notif-002",
+                    "aoi": _FOOTPRINT_WKT,
+                    "createdAt": NOW_ISO,
+                    "status": "active",
+                },
+            )
+        )
+
+        inp = SetupAOIMonitoringInput(
+            location=sample_location,
+            resolution_min=1.0,
+        )
+        result = await monitoring.setup_aoi_monitoring(client, inp, API_KEY)
+
+        assert result.monitor.monitor_id == "notif-002"
+        # Verify the request body did not include webhookUrl
+        import json
+        sent_body = json.loads(route.calls[0].request.content)
+        assert "webhookUrl" not in sent_body
+
 
 class TestListMonitors:
     @respx.mock

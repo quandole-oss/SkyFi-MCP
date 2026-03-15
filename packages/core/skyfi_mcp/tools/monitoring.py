@@ -73,8 +73,9 @@ async def setup_aoi_monitoring(
 
     body: dict[str, Any] = {
         "aoi": aoi,
-        "webhookUrl": input.notification_url or "https://example.com/webhook",
     }
+    if input.notification_url:
+        body["webhookUrl"] = input.notification_url
     if input.resolution_min is not None:
         body["gsdMin"] = int(input.resolution_min)
 

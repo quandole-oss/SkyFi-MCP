@@ -459,6 +459,7 @@ export class SkyFiMCP extends DurableObject<Env> {
           .boolean()
           .default(false)
           .describe("Must be true to execute the order"),
+        webhook_url: z.string().optional().describe("Webhook URL for order status notifications"),
       },
       DESTRUCTIVE,
       async (input) => proxy("place_archive_order", input),
@@ -466,13 +467,18 @@ export class SkyFiMCP extends DurableObject<Env> {
 
     this.server.tool(
       "place_tasking_order",
-      "Place a tasking order using a quote ID. Call with confirmed=false first to review, then confirmed=true to execute.",
+      "Place a tasking order for new satellite imagery capture. Requires location, capture window, product type, and resolution. Call with confirmed=false first to review, then confirmed=true to execute.",
       {
-        quote_id: z.string().describe("Quote ID from get_tasking_quote"),
+        location: LocationInputSchema,
+        window_start: z.string().describe("Capture window start (ISO 8601)"),
+        window_end: z.string().describe("Capture window end (ISO 8601)"),
+        product_type: z.string().default("DAY").describe("Product type (e.g. DAY, NIGHT)"),
+        resolution: z.string().default("HIGH").describe("Resolution level (e.g. HIGH, VERY HIGH)"),
         confirmed: z
           .boolean()
           .default(false)
           .describe("Must be true to execute the order"),
+        webhook_url: z.string().optional().describe("Webhook URL for order status notifications"),
       },
       DESTRUCTIVE,
       async (input) => proxy("place_tasking_order", input),

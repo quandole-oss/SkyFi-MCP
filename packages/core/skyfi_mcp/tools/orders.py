@@ -216,7 +216,9 @@ async def get_order_status(
     elif raw.get("customerItemCost") is not None:
         price = PriceBreakdown(
             subtotal=float(raw["customerItemCost"]),
+            processing_fee=0.0,
             total=float(raw["customerItemCost"]),
+            currency="USD",
         )
     else:
         price = None
@@ -261,7 +263,9 @@ async def list_orders(
         if price is None and item.get("customerItemCost") is not None:
             price = PriceBreakdown(
                 subtotal=float(item["customerItemCost"]),
+                processing_fee=0.0,
                 total=float(item["customerItemCost"]),
+                currency="USD",
             )
         orders.append(
             OrderStatusOutput(

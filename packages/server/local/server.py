@@ -10,7 +10,8 @@ Agent A's typed tool functions that expect (client, input_model, api_key).
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, cast
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -149,8 +150,8 @@ def _build_delivery_options(opts: dict[str, Any] | None) -> DeliveryOptions | No
 def _to_dict(result: Any) -> dict[str, Any]:
     """Serialize a Pydantic model to dict for MCP response."""
     if hasattr(result, "model_dump"):
-        return result.model_dump(mode="json")
-    return result
+        return cast("dict[str, Any]", result.model_dump(mode="json"))
+    return cast("dict[str, Any]", result)
 
 
 # ---------------------------------------------------------------------------
@@ -376,8 +377,8 @@ async def place_tasking_order(
     """Place a tasking order (requires human confirmation)."""
     input_model = PlaceTaskingOrderInput(
         location=_build_location(location),
-        window_start=window_start,
-        window_end=window_end,
+        window_start=datetime.fromisoformat(window_start),
+        window_end=datetime.fromisoformat(window_end),
         product_type=product_type,
         resolution=resolution,
         confirmed=confirmed,

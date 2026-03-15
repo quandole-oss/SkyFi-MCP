@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -576,11 +576,18 @@ class OrderStatusOutput(BaseModel):
 
     order_id: str
     status: OrderStatus
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     price: PriceBreakdown | None = None
     delivery_urls: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v: Any) -> Any:
+        if v == "":
+            return None
+        return v
 
 
 class ListOrdersOutput(BaseModel):

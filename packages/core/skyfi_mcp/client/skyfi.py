@@ -123,13 +123,26 @@ class SkyFiClient:
             except Exception:
                 body = {"raw": exc.response.text}
             safe_body = self._scrub_sensitive(body, api_key)
+            raw_error = safe_body.get("error", safe_body.get("detail", "http_error"))
+            raw_message = safe_body.get(
+                "message",
+                safe_body.get("detail", f"HTTP {exc.response.status_code} error"),
+            )
+            # API sometimes returns lists instead of strings for error/message
+            if isinstance(raw_error, list):
+                raw_error = "; ".join(
+                    e.get("msg", str(e)) if isinstance(e, dict) else str(e)
+                    for e in raw_error
+                )
+            if isinstance(raw_message, list):
+                raw_message = "; ".join(
+                    m.get("msg", str(m)) if isinstance(m, dict) else str(m)
+                    for m in raw_message
+                )
             error = SkyFiAPIError(
                 status_code=exc.response.status_code,
-                error=safe_body.get("error", safe_body.get("detail", "http_error")),
-                message=safe_body.get(
-                    "message",
-                    safe_body.get("detail", f"HTTP {exc.response.status_code} error"),
-                ),
+                error=str(raw_error),
+                message=str(raw_message),
                 details={
                     k: v
                     for k, v in safe_body.items()

@@ -222,8 +222,8 @@ async def get_order_status(
     return OrderStatusOutput(
         order_id=raw.get("orderId", raw.get("id", input.order_id)),
         status=_map_order_status(api_status),
-        created_at=raw.get("createdAt", raw.get("created_at", "")),
-        updated_at=raw.get("updatedAt", raw.get("lastModified", raw.get("createdAt", ""))),
+        created_at=raw.get("createdAt") or raw.get("created_at") or None,
+        updated_at=raw.get("updatedAt") or raw.get("lastModified") or raw.get("createdAt") or None,
         price=price,
         delivery_urls=raw.get("deliveryUrls", []),
         metadata={k: raw[k] for k in ("orderType", "provider", "label") if k in raw},
@@ -263,8 +263,8 @@ async def list_orders(
             OrderStatusOutput(
                 order_id=item.get("orderId", item.get("id", "")),
                 status=_map_order_status(api_status),
-                created_at=item.get("createdAt", item.get("created_at", "")),
-                updated_at=item.get("updatedAt", item.get("lastModified", "")),
+                created_at=item.get("createdAt") or item.get("created_at") or None,
+                updated_at=item.get("updatedAt") or item.get("lastModified") or None,
                 price=price,
                 delivery_urls=item.get("deliveryUrls", []),
                 metadata={k: item[k] for k in ("orderType", "provider", "label") if k in item},

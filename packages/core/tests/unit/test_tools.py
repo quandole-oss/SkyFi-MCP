@@ -223,6 +223,31 @@ class TestGetArchiveDetails:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_geometry_supports_centroid(self, client: SkyFiClient):
+        """geometry from footprint WKT should produce a valid centroid for map_url enrichment."""
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
+        )
+
+        inp = GetArchiveDetailsInput(archive_id="img-001")
+        result = await search.get_archive_details(client, inp, API_KEY)
+
+        geom = result.geometry
+        assert geom is not None
+        assert geom.type == "Polygon"
+        # Verify centroid can be computed (mirroring server-layer _geojson_centroid logic)
+        coords = geom.coordinates
+        assert len(coords) > 0
+        flat = coords[0]
+        lats = [p[1] for p in flat]
+        lons = [p[0] for p in flat]
+        lat = sum(lats) / len(lats)
+        lon = sum(lons) / len(lons)
+        assert 37.0 < lat < 38.0  # San Francisco area
+        assert -123.0 < lon < -122.0
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_thumbnail_url_missing(self, client: SkyFiClient):
         """thumbnail_url should be None when API omits thumbnailUrls."""
         respx.get(f"{BASE_URL}/archives/img-002").mock(
@@ -427,6 +452,22 @@ class TestPlaceArchiveOrder:
 
         result.preview.details["thumbnail_included"] = True
         assert result.preview.details["thumbnail_included"] is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_preview_details_accepts_map_url(self, client: SkyFiClient):
+        """preview.details should accept map_url set by the server layer."""
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
+        )
+
+        inp = PlaceArchiveOrderInput(archive_id="img-001", confirmed=False)
+        result = await orders.place_archive_order(client, inp, API_KEY)
+
+        assert result.preview is not None
+        # Server layer sets map_url after enrichment; verify details is mutable
+        result.preview.details["map_url"] = "https://www.google.com/maps/@37.75,-122.35,13z"
+        assert result.preview.details["map_url"].startswith("https://www.google.com/maps/@")
 
     @respx.mock
     @pytest.mark.asyncio
@@ -919,3 +960,157 @@ class TestConfirmationHelpers:
         assert result.confirmation.order_id == "ord-001"
         assert result.confirmation.order_url == "https://app.skyfi.com/orders/ord-001"
         assert "https://app.skyfi.com/orders/ord-001" in result.confirmation.message
+
+
+# ---------------------------------------------------------------------------
+# Static map rendering
+# ---------------------------------------------------------------------------
+
+
+class TestStaticMap:
+    @pytest.mark.asyncio
+    async def test_fetch_static_map_returns_png(self):
+        """fetch_static_map should return PNG bytes when render succeeds."""
+        from unittest.mock import patch
+
+        from PIL import Image as PILImage
+
+        from skyfi_mcp.static_maps import fetch_static_map
+
+        # Create a small test image that staticmap.render() would return
+        test_img = PILImage.new("RGB", (60, 40), color="blue")
+
+        with patch("skyfi_mcp.static_maps._render_map_sync") as mock_render:
+            import io
+
+            buf = io.BytesIO()
+            test_img.save(buf, format="PNG")
+            mock_render.return_value = buf.getvalue()
+
+            geometry = {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [-122.4, 37.7],
+                        [-122.4, 37.8],
+                        [-122.3, 37.8],
+                        [-122.3, 37.7],
+                        [-122.4, 37.7],
+                    ]
+                ],
+            }
+            result = await fetch_static_map(geometry)
+
+        assert result is not None
+        assert result.format == "png"
+        assert result.data[:8] == b"\x89PNG\r\n\x1a\n"
+
+    @pytest.mark.asyncio
+    async def test_fetch_static_map_returns_none_on_error(self):
+        """fetch_static_map should return None when rendering fails."""
+        from unittest.mock import patch
+
+        from skyfi_mcp.static_maps import fetch_static_map
+
+        with patch(
+            "skyfi_mcp.static_maps._render_map_sync",
+            side_effect=RuntimeError("tile fetch failed"),
+        ):
+            geometry = {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [-122.4, 37.7],
+                        [-122.4, 37.8],
+                        [-122.3, 37.8],
+                        [-122.3, 37.7],
+                        [-122.4, 37.7],
+                    ]
+                ],
+            }
+            result = await fetch_static_map(geometry)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_static_map_invalid_geometry(self):
+        """fetch_static_map should return None for unsupported geometry types."""
+        from skyfi_mcp.static_maps import fetch_static_map
+
+        result = await fetch_static_map({"type": "LineString", "coordinates": []})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_static_map_empty_ring(self):
+        """fetch_static_map should return None when ring has fewer than 3 points."""
+        from skyfi_mcp.static_maps import fetch_static_map
+
+        result = await fetch_static_map(
+            {"type": "Polygon", "coordinates": [[[-122.4, 37.7], [-122.3, 37.8]]]}
+        )
+        assert result is None
+
+    def test_render_map_sync_uses_tile_timeout(self):
+        """_render_map_sync should pass tile_request_timeout to StaticMap."""
+        from unittest.mock import MagicMock, patch
+
+        from skyfi_mcp.static_maps import _render_map_sync
+
+        ring = [[-122.4, 37.7], [-122.4, 37.8], [-122.3, 37.8], [-122.3, 37.7], [-122.4, 37.7]]
+
+        mock_sm_cls = MagicMock()
+        mock_sm_instance = MagicMock()
+        mock_sm_cls.return_value = mock_sm_instance
+
+        from PIL import Image as PILImage
+        mock_sm_instance.render.return_value = PILImage.new("RGB", (60, 40), color="blue")
+
+        with patch("skyfi_mcp.static_maps.StaticMap", mock_sm_cls, create=True), \
+             patch("skyfi_mcp.static_maps.Polygon", MagicMock(), create=True):
+            # Patch the import inside the function
+            import staticmap as sm_mod
+            with patch.object(sm_mod, "StaticMap", mock_sm_cls), \
+                 patch.object(sm_mod, "Polygon", MagicMock()):
+                _render_map_sync(ring, 600, 400)
+
+        # Verify tile_request_timeout=3 was passed
+        call_kwargs = mock_sm_cls.call_args
+        assert call_kwargs is not None
+        assert call_kwargs[1].get("tile_request_timeout") == 3 or \
+               (len(call_kwargs[0]) > 2 and False) or \
+               call_kwargs.kwargs.get("tile_request_timeout") == 3
+
+    def test_render_map_sync_no_stdout_pollution(self):
+        """_render_map_sync should not let staticmap print() reach real stdout."""
+        import io
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        from skyfi_mcp.static_maps import _render_map_sync
+
+        ring = [[-122.4, 37.7], [-122.4, 37.8], [-122.3, 37.8], [-122.3, 37.7], [-122.4, 37.7]]
+
+        captured = io.StringIO()
+
+        from PIL import Image as PILImage
+
+        def fake_render(**kwargs):
+            # Simulate staticmap printing on failed tile fetch
+            print("request failed [503]: https://tile.openstreetmap.org/...")
+            return PILImage.new("RGB", (60, 40), color="blue")
+
+        mock_sm_instance = MagicMock()
+        mock_sm_instance.render.side_effect = fake_render
+
+        import staticmap as sm_mod
+        with patch.object(sm_mod, "StaticMap", return_value=mock_sm_instance), \
+             patch.object(sm_mod, "Polygon", MagicMock()):
+            old_stdout = sys.stdout
+            sys.stdout = captured
+            try:
+                _render_map_sync(ring, 600, 400)
+            finally:
+                sys.stdout = old_stdout
+
+        # The print inside render should NOT have reached our captured stream
+        assert "request failed" not in captured.getvalue()

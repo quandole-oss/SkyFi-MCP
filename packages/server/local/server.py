@@ -10,6 +10,7 @@ Agent A's typed tool functions that expect (client, input_model, api_key).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any, cast
@@ -19,6 +20,7 @@ from fastmcp.utilities.types import Image
 from mcp.types import TextContent, ToolAnnotations
 from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.client.skyfi import SkyFiClient
+from skyfi_mcp.static_maps import fetch_static_map
 from skyfi_mcp.thumbnails import fetch_thumbnails
 from skyfi_mcp.tools import geo as geo_tools
 from skyfi_mcp.tools import monitoring as monitoring_tools
@@ -155,15 +157,8 @@ def _to_dict(result: Any) -> dict[str, Any]:
     return cast("dict[str, Any]", result)
 
 
-def _wkt_centroid(wkt: str) -> tuple[float, float] | None:
-    """Extract approximate centroid (lat, lon) from a WKT string."""
-    from skyfi_mcp.client.wkt import wkt_to_geojson
-
-    try:
-        geom = wkt_to_geojson(wkt)
-    except (ValueError, IndexError):
-        return None
-
+def _geojson_centroid(geom: dict[str, Any]) -> tuple[float, float] | None:
+    """Approximate centroid (lat, lon) from a GeoJSON geometry dict."""
     coords = geom.get("coordinates", [])
     if geom["type"] == "Point":
         return (coords[1], coords[0])
@@ -181,6 +176,17 @@ def _wkt_centroid(wkt: str) -> tuple[float, float] | None:
     lats = [p[1] for p in flat]
     lons = [p[0] for p in flat]
     return (sum(lats) / len(lats), sum(lons) / len(lons))
+
+
+def _wkt_centroid(wkt: str) -> tuple[float, float] | None:
+    """Extract approximate centroid (lat, lon) from a WKT string."""
+    from skyfi_mcp.client.wkt import wkt_to_geojson
+
+    try:
+        geom = wkt_to_geojson(wkt)
+    except (ValueError, IndexError):
+        return None
+    return _geojson_centroid(geom)
 
 
 async def _resolve_location_name(
@@ -293,7 +299,8 @@ async def search_archive(
     name="get_archive_details",
     description=(
         "Get detailed metadata for a specific archive image, including "
-        "bands, file size, license, and full geometry."
+        "bands, file size, license, and full geometry. "
+        "A coverage area map image may be included alongside the details."
     ),
     annotations=_READ_ONLY,
 )
@@ -306,11 +313,22 @@ async def get_archive_details(
     result = await search_tools.get_archive_details(_skyfi_client, input_model, _api_key)
     result_dict = _to_dict(result)
 
-    thumbs: dict[str, Any] = {}
-    if include_thumbnails and result.thumbnail_url:
-        thumbs = await fetch_thumbnails(
-            [(result.archive_id, result.thumbnail_url)], max_count=1
-        )
+    # Add Google Maps link from geometry centroid
+    geom = result_dict.get("geometry")
+    if geom:
+        centroid = _geojson_centroid(geom)
+        if centroid:
+            lat, lon = centroid
+            result_dict["map_url"] = f"https://www.google.com/maps/@{lat},{lon},13z"
+
+    # Fetch thumbnail and static map concurrently
+    thumb_task = (
+        fetch_thumbnails([(result.archive_id, result.thumbnail_url)], max_count=1)
+        if include_thumbnails and result.thumbnail_url
+        else asyncio.sleep(0, result={})
+    )
+    map_task = fetch_static_map(geom) if geom else asyncio.sleep(0, result=None)
+    thumbs, map_image = await asyncio.gather(thumb_task, map_task)
 
     # Strip external thumbnail_url (behind auth, useless to Claude)
     _strip_thumbnail_urls(result_dict)
@@ -322,6 +340,10 @@ async def get_archive_details(
     # Image content block for Claude's vision model
     for _archive_id, thumb in thumbs.items():
         content.append(Image(data=thumb.data, format=thumb.format))
+
+    # Static map image of coverage area
+    if map_image:
+        content.append(Image(data=map_image.data, format=map_image.format))
 
     return content
 
@@ -457,9 +479,10 @@ async def compare_pricing(
         "confirmed=true to execute the order. "
         "When showing the preview, display the location, provider, area, "
         "estimated delivery, and price breakdown as a checkout summary. "
+        "A coverage area map image may be included alongside the details. "
         "A thumbnail image may be included — only reference it if "
         "thumbnail_included is true in the response. "
-        "Ask the user to confirm before proceeding."
+        "Always show the preview and ask the user to confirm, even if the order is free."
     ),
     annotations=_DESTRUCTIVE,
 )
@@ -479,17 +502,38 @@ async def place_archive_order(
     result = await order_tools.place_archive_order(_skyfi_client, input_model, _api_key)
     result_dict = _to_dict(result)
 
-    # For preview: enrich with thumbnail + location
+    # For preview: enrich with thumbnail + location + map concurrently
     if result.preview is not None:
         archive = await _skyfi_client.get_archive(_api_key, archive_id=archive_id)
         thumb_urls = archive.get("thumbnailUrls", {})
         thumb_url = next(iter(thumb_urls.values()), None)
+        footprint = archive.get("footprint", "")
+
+        async def _fetch_order_map(fp: str) -> Any:
+            from skyfi_mcp.client.wkt import wkt_to_geojson as _wkt_to_geojson
+            try:
+                return await fetch_static_map(_wkt_to_geojson(fp))
+            except (ValueError, IndexError):
+                return None
+
+        thumb_task = (
+            fetch_thumbnails([(archive_id, thumb_url)], max_count=1)
+            if thumb_url
+            else asyncio.sleep(0, result={})
+        )
+        loc_task = (
+            _resolve_location_name({"metadata": {"aoi": footprint}}, _osm_client)
+            if footprint
+            else asyncio.sleep(0, result="")
+        )
+        map_task = _fetch_order_map(footprint) if footprint else asyncio.sleep(0, result=None)
+
+        thumbs, loc_name, map_img = await asyncio.gather(thumb_task, loc_task, map_task)
 
         content: list[TextContent | Image] = []
         thumbnail_included = False
 
         if thumb_url:
-            thumbs = await fetch_thumbnails([(archive_id, thumb_url)], max_count=1)
             thumb = thumbs.get(archive_id)
             if thumb:
                 content.append(Image(data=thumb.data, format=thumb.format))
@@ -497,14 +541,20 @@ async def place_archive_order(
 
         result_dict["preview"]["details"]["thumbnail_included"] = thumbnail_included
 
-        # Resolve location from footprint
-        footprint = archive.get("footprint", "")
+        if loc_name:
+            result_dict["preview"]["details"]["location_name"] = loc_name
+
+        # Add Google Maps link from footprint centroid
         if footprint:
-            loc = await _resolve_location_name(
-                {"metadata": {"aoi": footprint}}, _osm_client
-            )
-            if loc:
-                result_dict["preview"]["details"]["location_name"] = loc
+            centroid = _wkt_centroid(footprint)
+            if centroid:
+                lat, lon = centroid
+                result_dict["preview"]["details"]["map_url"] = (
+                    f"https://www.google.com/maps/@{lat},{lon},13z"
+                )
+
+        if map_img:
+            content.append(Image(data=map_img.data, format=map_img.format))
 
         content.insert(0, TextContent(type="text", text=json.dumps(result_dict)))
         return content
@@ -520,7 +570,9 @@ async def place_archive_order(
         "Requires two-step confirmation: call first with confirmed=false "
         "to review the price, then with confirmed=true to execute. "
         "When showing the preview, display the location, capture window, "
-        "product details, and price breakdown as a checkout summary."
+        "product details, and price breakdown as a checkout summary. "
+        "A coverage area map image may be included alongside the details. "
+        "Always show the preview and ask the user to confirm, even if the order is free."
     ),
     annotations=_DESTRUCTIVE,
 )
@@ -532,7 +584,7 @@ async def place_tasking_order(
     resolution: str = "HIGH",
     confirmed: bool = False,
     webhook_url: str | None = None,
-) -> dict[str, Any]:
+) -> list[TextContent | Image] | dict[str, Any]:
     """Place a tasking order (requires human confirmation)."""
     input_model = PlaceTaskingOrderInput(
         location=_build_location(location),
@@ -546,19 +598,40 @@ async def place_tasking_order(
     result = await order_tools.place_tasking_order(_skyfi_client, input_model, _api_key)
     result_dict = _to_dict(result)
 
-    # For preview: enrich with location name from input geometry
+    # For preview: enrich with location name + map concurrently
     if result.preview is not None:
+        content: list[TextContent | Image] = []
         geom = location.get("geometry")
         if geom:
             from skyfi_mcp.client.wkt import geojson_to_wkt
 
             aoi_wkt = geojson_to_wkt(geom)
+
+            loc_task = (
+                _resolve_location_name({"metadata": {"aoi": aoi_wkt}}, _osm_client)
+                if aoi_wkt
+                else asyncio.sleep(0, result="")
+            )
+            map_task = fetch_static_map(geom)
+            loc_name, map_img = await asyncio.gather(loc_task, map_task)
+
+            if loc_name:
+                result_dict["preview"]["details"]["location_name"] = loc_name
+
+            # Add Google Maps link from input geometry centroid
             if aoi_wkt:
-                loc = await _resolve_location_name(
-                    {"metadata": {"aoi": aoi_wkt}}, _osm_client
-                )
-                if loc:
-                    result_dict["preview"]["details"]["location_name"] = loc
+                centroid = _wkt_centroid(aoi_wkt)
+                if centroid:
+                    lat, lon = centroid
+                    result_dict["preview"]["details"]["map_url"] = (
+                        f"https://www.google.com/maps/@{lat},{lon},13z"
+                    )
+
+            if map_img:
+                content.append(Image(data=map_img.data, format=map_img.format))
+
+        content.insert(0, TextContent(type="text", text=json.dumps(result_dict)))
+        return content
 
     return result_dict
 

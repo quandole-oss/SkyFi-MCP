@@ -21,7 +21,10 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 # ---------------------------------------------------------------------------
 # Path setup — mirror the entry-point shim so all imports resolve
@@ -108,8 +111,9 @@ async def main() -> int:
         return 1
 
     # Import the FastMCP server (triggers config loading)
-    from packages.server.local.server import mcp as server
     from fastmcp import Client
+
+    from packages.server.local.server import mcp as server
 
     print()
     print("=" * 55)

@@ -21,7 +21,7 @@ from mcp.types import TextContent, ToolAnnotations
 from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.client.skyfi import SkyFiClient
 from skyfi_mcp.static_maps import fetch_static_map
-from skyfi_mcp.thumbnails import fetch_thumbnails
+from skyfi_mcp.thumbnails import encode_thumbnail_base64, fetch_thumbnails
 from skyfi_mcp.tools import geo as geo_tools
 from skyfi_mcp.tools import monitoring as monitoring_tools
 from skyfi_mcp.tools import orders as order_tools
@@ -224,14 +224,35 @@ async def _resolve_location_name(
         return ""
 
 
-def _strip_thumbnail_urls(result_dict: dict[str, Any]) -> None:
-    """Remove external thumbnail_url fields (not useful to Claude)."""
+def _inject_thumbnail_data_uris(
+    result_dict: dict[str, Any],
+    thumbs: dict[str, Any],
+) -> None:
+    """Embed base64 data URIs for thumbnails and strip external URLs."""
     results = result_dict.get("results")
     if isinstance(results, list):
         for item in results:
+            aid = item.get("archive_id", "")
+            thumb = thumbs.get(aid)
+            if thumb:
+                b64 = encode_thumbnail_base64(thumb.data)
+                item["thumbnail_data_uri"] = f"data:image/{thumb.format};base64,{b64}"
             item.pop("thumbnail_url", None)
     else:
+        aid = result_dict.get("archive_id", "")
+        thumb = thumbs.get(aid)
+        if thumb:
+            b64 = encode_thumbnail_base64(thumb.data)
+            result_dict["thumbnail_data_uri"] = f"data:image/{thumb.format};base64,{b64}"
         result_dict.pop("thumbnail_url", None)
+
+
+def _inject_map_data_uri(target: dict[str, Any], map_image: Any) -> None:
+    """Embed a static map image as a data URI in *target*."""
+    if map_image is None:
+        return
+    b64 = encode_thumbnail_base64(map_image.data)
+    target["map_data_uri"] = f"data:image/{map_image.format};base64,{b64}"
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +265,9 @@ def _strip_thumbnail_urls(result_dict: dict[str, Any]) -> None:
     description=(
         "Search SkyFi's satellite imagery archive by location, date range, "
         "resolution, sensor type, and cloud cover. Returns matching imagery "
-        "results with pagination."
+        "results with pagination. "
+        "If thumbnail_data_uri fields are present in the results, render them "
+        "as inline markdown images for the user."
     ),
     annotations=_READ_ONLY,
 )
@@ -281,8 +304,8 @@ async def search_archive(
         if thumb_urls:
             thumbs = await fetch_thumbnails(thumb_urls, max_count=3)
 
-    # Strip external thumbnail_url (behind auth, useless to Claude)
-    _strip_thumbnail_urls(result_dict)
+    # Embed data URIs in JSON text (for inline markdown rendering by Claude)
+    _inject_thumbnail_data_uris(result_dict, thumbs)
 
     content: list[TextContent | Image] = [
         TextContent(type="text", text=json.dumps(result_dict))
@@ -300,7 +323,9 @@ async def search_archive(
     description=(
         "Get detailed metadata for a specific archive image, including "
         "bands, file size, license, and full geometry. "
-        "A coverage area map image may be included alongside the details."
+        "A coverage area map image may be included alongside the details. "
+        "If thumbnail_data_uri or map_data_uri fields are present, render "
+        "them as inline markdown images for the user."
     ),
     annotations=_READ_ONLY,
 )
@@ -330,14 +355,15 @@ async def get_archive_details(
     map_task = fetch_static_map(geom) if geom else asyncio.sleep(0, result=None)
     thumbs, map_image = await asyncio.gather(thumb_task, map_task)
 
-    # Strip external thumbnail_url (behind auth, useless to Claude)
-    _strip_thumbnail_urls(result_dict)
+    # Embed data URIs in JSON text (for inline markdown rendering by Claude)
+    _inject_thumbnail_data_uris(result_dict, thumbs)
+    _inject_map_data_uri(result_dict, map_image)
 
     content: list[TextContent | Image] = [
         TextContent(type="text", text=json.dumps(result_dict))
     ]
 
-    # Image content block for Claude's vision model
+    # Image content blocks for Claude's vision model
     for _archive_id, thumb in thumbs.items():
         content.append(Image(data=thumb.data, format=thumb.format))
 
@@ -482,6 +508,8 @@ async def compare_pricing(
         "A coverage area map image may be included alongside the details. "
         "A thumbnail image may be included — only reference it if "
         "thumbnail_included is true in the response. "
+        "If thumbnail_data_uri or map_data_uri fields are present, render "
+        "them as inline markdown images for the user. "
         "Always show the preview and ask the user to confirm, even if the order is free."
     ),
     annotations=_DESTRUCTIVE,
@@ -538,6 +566,10 @@ async def place_archive_order(
             if thumb:
                 content.append(Image(data=thumb.data, format=thumb.format))
                 thumbnail_included = True
+                b64 = encode_thumbnail_base64(thumb.data)
+                result_dict["preview"]["details"]["thumbnail_data_uri"] = (
+                    f"data:image/{thumb.format};base64,{b64}"
+                )
 
         result_dict["preview"]["details"]["thumbnail_included"] = thumbnail_included
 
@@ -553,6 +585,7 @@ async def place_archive_order(
                     f"https://www.google.com/maps/@{lat},{lon},13z"
                 )
 
+        _inject_map_data_uri(result_dict["preview"]["details"], map_img)
         if map_img:
             content.append(Image(data=map_img.data, format=map_img.format))
 
@@ -572,6 +605,8 @@ async def place_archive_order(
         "When showing the preview, display the location, capture window, "
         "product details, and price breakdown as a checkout summary. "
         "A coverage area map image may be included alongside the details. "
+        "If map_data_uri field is present, render it as an inline markdown "
+        "image for the user. "
         "Always show the preview and ask the user to confirm, even if the order is free."
     ),
     annotations=_DESTRUCTIVE,
@@ -627,6 +662,7 @@ async def place_tasking_order(
                         f"https://www.google.com/maps/@{lat},{lon},13z"
                     )
 
+            _inject_map_data_uri(result_dict["preview"]["details"], map_img)
             if map_img:
                 content.append(Image(data=map_img.data, format=map_img.format))
 

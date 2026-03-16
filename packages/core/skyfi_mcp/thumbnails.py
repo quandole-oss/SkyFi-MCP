@@ -42,6 +42,7 @@ async def fetch_thumbnails(
     urls: list[tuple[str, str]],
     max_count: int = 5,
     timeout_seconds: float = 5.0,
+    max_bytes: int = 200_000,
 ) -> dict[str, FetchedThumbnail]:
     """Fetch thumbnail images in parallel and return bytes with format.
 
@@ -49,6 +50,7 @@ async def fetch_thumbnails(
         urls: List of (archive_id, url) pairs to fetch.
         max_count: Maximum number of thumbnails to fetch.
         timeout_seconds: Per-image timeout in seconds.
+        max_bytes: Maximum size in bytes per thumbnail; larger images are skipped.
 
     Returns:
         Dict mapping archive_id to FetchedThumbnail.
@@ -66,6 +68,13 @@ async def fetch_thumbnails(
         try:
             resp = await client.get(url, timeout=timeout_seconds)
             resp.raise_for_status()
+            if len(resp.content) > max_bytes:
+                logger.debug(
+                    "Thumbnail for %s too large (%d bytes), skipping",
+                    archive_id,
+                    len(resp.content),
+                )
+                return None
             fmt = detect_image_format(resp.content)
             return (archive_id, FetchedThumbnail(data=resp.content, format=fmt))
         except (httpx.HTTPError, httpx.TimeoutException):

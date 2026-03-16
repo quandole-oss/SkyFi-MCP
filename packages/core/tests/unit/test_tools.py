@@ -411,6 +411,44 @@ class TestPlaceArchiveOrder:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_preview_details_accepts_thumbnail_included(self, client: SkyFiClient):
+        """preview.details should accept thumbnail_included flag set by the server layer."""
+        respx.get(f"{BASE_URL}/archives/img-001").mock(
+            return_value=httpx.Response(200, json=_archive_item())
+        )
+
+        inp = PlaceArchiveOrderInput(archive_id="img-001", confirmed=False)
+        result = await orders.place_archive_order(client, inp, API_KEY)
+
+        assert result.preview is not None
+        # Server layer sets this flag after enrichment; verify details is mutable
+        result.preview.details["thumbnail_included"] = False
+        assert result.preview.details["thumbnail_included"] is False
+
+        result.preview.details["thumbnail_included"] = True
+        assert result.preview.details["thumbnail_included"] is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_preview_no_thumbnail_url(self, client: SkyFiClient):
+        """Archives without thumbnailUrls should still produce a valid preview."""
+        respx.get(f"{BASE_URL}/archives/img-sar").mock(
+            return_value=httpx.Response(
+                200,
+                json=_archive_item(archiveId="img-sar", thumbnailUrls={}),
+            )
+        )
+
+        inp = PlaceArchiveOrderInput(archive_id="img-sar", confirmed=False)
+        result = await orders.place_archive_order(client, inp, API_KEY)
+
+        assert result.preview is not None
+        assert result.confirmation is None
+        # No thumbnail URL means server will set thumbnail_included=False
+        assert "thumbnail_included" not in result.preview.details
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_preview_default_confirmed(self, client: SkyFiClient):
         """Default (no confirmed kwarg) should also return preview."""
         respx.get(f"{BASE_URL}/archives/img-001").mock(
@@ -550,6 +588,8 @@ class TestListOrders:
                             "deliveryStatus": "DELIVERY_COMPLETED",
                             "createdAt": NOW_ISO,
                             "lastModified": NOW_ISO,
+                            "label": "Austin, TX",
+                            "aoi": "POLYGON((-97.8 30.2,-97.7 30.2,-97.7 30.3,-97.8 30.3,-97.8 30.2))",
                         }
                     ],
                     "hasMore": False,
@@ -563,6 +603,8 @@ class TestListOrders:
 
         assert len(result.orders) == 1
         assert result.pagination.has_more is False
+        assert result.orders[0].location_name == "Austin, TX"
+        assert "aoi" in result.orders[0].metadata
 
 
 class TestGetOrderImages:

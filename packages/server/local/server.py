@@ -19,7 +19,7 @@ from fastmcp.utilities.types import Image
 from mcp.types import TextContent, ToolAnnotations
 from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.client.skyfi import SkyFiClient
-from skyfi_mcp.thumbnails import encode_thumbnail_base64, fetch_thumbnails
+from skyfi_mcp.thumbnails import fetch_thumbnails
 from skyfi_mcp.tools import geo as geo_tools
 from skyfi_mcp.tools import monitoring as monitoring_tools
 from skyfi_mcp.tools import orders as order_tools
@@ -218,34 +218,13 @@ async def _resolve_location_name(
         return ""
 
 
-def _inject_thumbnail_data_uris(
-    result_dict: dict[str, Any],
-    thumbnails: dict[str, Any],
-) -> None:
-    """Embed base64 data URIs into result dicts and strip external thumbnail_url.
-
-    Mutates *result_dict* in place.  Works for both search (list of results)
-    and detail (single result) payloads.
-    """
+def _strip_thumbnail_urls(result_dict: dict[str, Any]) -> None:
+    """Remove external thumbnail_url fields (not useful to Claude)."""
     results = result_dict.get("results")
     if isinstance(results, list):
-        # search_archive — list of results
         for item in results:
-            aid = item.get("archive_id")
-            if aid and aid in thumbnails:
-                thumb = thumbnails[aid]
-                mime = f"image/{thumb.format}"
-                b64 = encode_thumbnail_base64(thumb.data)
-                item["thumbnail_data_uri"] = f"data:{mime};base64,{b64}"
             item.pop("thumbnail_url", None)
     else:
-        # get_archive_details — single result at top level
-        aid = result_dict.get("archive_id")
-        if aid and aid in thumbnails:
-            thumb = thumbnails[aid]
-            mime = f"image/{thumb.format}"
-            b64 = encode_thumbnail_base64(thumb.data)
-            result_dict["thumbnail_data_uri"] = f"data:{mime};base64,{b64}"
         result_dict.pop("thumbnail_url", None)
 
 
@@ -294,16 +273,16 @@ async def search_archive(
             if r.thumbnail_url
         ]
         if thumb_urls:
-            thumbs = await fetch_thumbnails(thumb_urls, max_count=5)
+            thumbs = await fetch_thumbnails(thumb_urls, max_count=3)
 
-    # Embed data URIs and strip external thumbnail_url from all results
-    _inject_thumbnail_data_uris(result_dict, thumbs)
+    # Strip external thumbnail_url (behind auth, useless to Claude)
+    _strip_thumbnail_urls(result_dict)
 
     content: list[TextContent | Image] = [
         TextContent(type="text", text=json.dumps(result_dict))
     ]
 
-    # Keep Image content blocks for Claude's vision model
+    # Image content blocks for Claude's vision model
     for _archive_id, thumb in thumbs.items():
         content.append(Image(data=thumb.data, format=thumb.format))
 
@@ -333,14 +312,14 @@ async def get_archive_details(
             [(result.archive_id, result.thumbnail_url)], max_count=1
         )
 
-    # Embed data URI and strip external thumbnail_url
-    _inject_thumbnail_data_uris(result_dict, thumbs)
+    # Strip external thumbnail_url (behind auth, useless to Claude)
+    _strip_thumbnail_urls(result_dict)
 
     content: list[TextContent | Image] = [
         TextContent(type="text", text=json.dumps(result_dict))
     ]
 
-    # Keep Image content block for Claude's vision model
+    # Image content block for Claude's vision model
     for _archive_id, thumb in thumbs.items():
         content.append(Image(data=thumb.data, format=thumb.format))
 
@@ -476,9 +455,11 @@ async def compare_pricing(
         "Place an order for an archive image. Requires two-step confirmation: "
         "call first with confirmed=false to preview the price, then with "
         "confirmed=true to execute the order. "
-        "When showing the preview, display the thumbnail image, location, "
-        "provider, area, estimated delivery, and price breakdown as a "
-        "checkout summary. Ask the user to confirm before proceeding."
+        "When showing the preview, display the location, provider, area, "
+        "estimated delivery, and price breakdown as a checkout summary. "
+        "A thumbnail image may be included — only reference it if "
+        "thumbnail_included is true in the response. "
+        "Ask the user to confirm before proceeding."
     ),
     annotations=_DESTRUCTIVE,
 )
@@ -505,17 +486,16 @@ async def place_archive_order(
         thumb_url = next(iter(thumb_urls.values()), None)
 
         content: list[TextContent | Image] = []
+        thumbnail_included = False
 
         if thumb_url:
             thumbs = await fetch_thumbnails([(archive_id, thumb_url)], max_count=1)
             thumb = thumbs.get(archive_id)
             if thumb:
-                mime = f"image/{thumb.format}"
-                b64 = encode_thumbnail_base64(thumb.data)
-                result_dict["preview"]["details"]["thumbnail_data_uri"] = (
-                    f"data:{mime};base64,{b64}"
-                )
                 content.append(Image(data=thumb.data, format=thumb.format))
+                thumbnail_included = True
+
+        result_dict["preview"]["details"]["thumbnail_included"] = thumbnail_included
 
         # Resolve location from footprint
         footprint = archive.get("footprint", "")

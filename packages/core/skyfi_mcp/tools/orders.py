@@ -229,12 +229,13 @@ async def get_order_status(
     return OrderStatusOutput(
         order_id=oid,
         order_url=f"https://app.skyfi.com/orders/{oid}",
+        location_name=raw.get("label", ""),
         status=_map_order_status(api_status),
         created_at=raw.get("createdAt") or raw.get("created_at") or None,
         updated_at=raw.get("updatedAt") or raw.get("lastModified") or raw.get("createdAt") or None,
         price=price,
         delivery_urls=raw.get("deliveryUrls", []),
-        metadata={k: raw[k] for k in ("orderType", "provider", "label") if k in raw},
+        metadata={k: raw[k] for k in ("orderType", "provider", "label", "aoi") if k in raw},
     )
 
 
@@ -274,12 +275,13 @@ async def list_orders(
             OrderStatusOutput(
                 order_id=oid,
                 order_url=f"https://app.skyfi.com/orders/{oid}",
+                location_name=item.get("label", ""),
                 status=_map_order_status(api_status),
                 created_at=item.get("createdAt") or item.get("created_at") or None,
                 updated_at=item.get("updatedAt") or item.get("lastModified") or None,
                 price=price,
                 delivery_urls=item.get("deliveryUrls", []),
-                metadata={k: item[k] for k in ("orderType", "provider", "label") if k in item},
+                metadata={k: item[k] for k in ("orderType", "provider", "label", "aoi") if k in item},
             )
         )
 

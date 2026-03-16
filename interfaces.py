@@ -592,6 +592,10 @@ class OrderStatusOutput(BaseModel):
         "",
         description="Direct link to the order on SkyFi (e.g. https://app.skyfi.com/orders/{id}).",
     )
+    location_name: str = Field(
+        "",
+        description="Human-readable area name (e.g. 'Austin, TX').",
+    )
     status: OrderStatus
     created_at: datetime | None = None
     updated_at: datetime | None = None

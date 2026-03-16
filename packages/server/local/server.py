@@ -19,7 +19,7 @@ from fastmcp.utilities.types import Image
 from mcp.types import TextContent, ToolAnnotations
 from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.client.skyfi import SkyFiClient
-from skyfi_mcp.thumbnails import fetch_thumbnails
+from skyfi_mcp.thumbnails import encode_thumbnail_base64, fetch_thumbnails
 from skyfi_mcp.tools import geo as geo_tools
 from skyfi_mcp.tools import monitoring as monitoring_tools
 from skyfi_mcp.tools import orders as order_tools
@@ -155,6 +155,37 @@ def _to_dict(result: Any) -> dict[str, Any]:
     return cast("dict[str, Any]", result)
 
 
+def _inject_thumbnail_data_uris(
+    result_dict: dict[str, Any],
+    thumbnails: dict[str, Any],
+) -> None:
+    """Embed base64 data URIs into result dicts and strip external thumbnail_url.
+
+    Mutates *result_dict* in place.  Works for both search (list of results)
+    and detail (single result) payloads.
+    """
+    results = result_dict.get("results")
+    if isinstance(results, list):
+        # search_archive — list of results
+        for item in results:
+            aid = item.get("archive_id")
+            if aid and aid in thumbnails:
+                thumb = thumbnails[aid]
+                mime = f"image/{thumb.format}"
+                b64 = encode_thumbnail_base64(thumb.data)
+                item["thumbnail_data_uri"] = f"data:{mime};base64,{b64}"
+            item.pop("thumbnail_url", None)
+    else:
+        # get_archive_details — single result at top level
+        aid = result_dict.get("archive_id")
+        if aid and aid in thumbnails:
+            thumb = thumbnails[aid]
+            mime = f"image/{thumb.format}"
+            b64 = encode_thumbnail_base64(thumb.data)
+            result_dict["thumbnail_data_uri"] = f"data:{mime};base64,{b64}"
+        result_dict.pop("thumbnail_url", None)
+
+
 # ---------------------------------------------------------------------------
 # Search & Discovery tools
 # ---------------------------------------------------------------------------
@@ -190,11 +221,9 @@ async def search_archive(
         page_token=page_token,
     )
     result = await search_tools.search_archive(_skyfi_client, input_model, _api_key)
+    result_dict = _to_dict(result)
 
-    content: list[TextContent | Image] = [
-        TextContent(type="text", text=json.dumps(_to_dict(result)))
-    ]
-
+    thumbs: dict[str, Any] = {}
     if include_thumbnails:
         thumb_urls = [
             (r.archive_id, r.thumbnail_url)
@@ -203,8 +232,17 @@ async def search_archive(
         ]
         if thumb_urls:
             thumbs = await fetch_thumbnails(thumb_urls, max_count=5)
-            for _archive_id, thumb in thumbs.items():
-                content.append(Image(data=thumb.data, format=thumb.format))
+
+    # Embed data URIs and strip external thumbnail_url from all results
+    _inject_thumbnail_data_uris(result_dict, thumbs)
+
+    content: list[TextContent | Image] = [
+        TextContent(type="text", text=json.dumps(result_dict))
+    ]
+
+    # Keep Image content blocks for Claude's vision model
+    for _archive_id, thumb in thumbs.items():
+        content.append(Image(data=thumb.data, format=thumb.format))
 
     return content
 
@@ -224,17 +262,24 @@ async def get_archive_details(
     """Retrieve full details for a single archive image."""
     input_model = GetArchiveDetailsInput(archive_id=archive_id)
     result = await search_tools.get_archive_details(_skyfi_client, input_model, _api_key)
+    result_dict = _to_dict(result)
 
-    content: list[TextContent | Image] = [
-        TextContent(type="text", text=json.dumps(_to_dict(result)))
-    ]
-
+    thumbs: dict[str, Any] = {}
     if include_thumbnails and result.thumbnail_url:
         thumbs = await fetch_thumbnails(
             [(result.archive_id, result.thumbnail_url)], max_count=1
         )
-        for _archive_id, thumb in thumbs.items():
-            content.append(Image(data=thumb.data, format=thumb.format))
+
+    # Embed data URI and strip external thumbnail_url
+    _inject_thumbnail_data_uris(result_dict, thumbs)
+
+    content: list[TextContent | Image] = [
+        TextContent(type="text", text=json.dumps(result_dict))
+    ]
+
+    # Keep Image content block for Claude's vision model
+    for _archive_id, thumb in thumbs.items():
+        content.append(Image(data=thumb.data, format=thumb.format))
 
     return content
 

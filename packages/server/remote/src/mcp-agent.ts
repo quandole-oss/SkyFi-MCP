@@ -22,6 +22,43 @@ import { proxyToolCall } from "./proxy.js";
 import { fetchThumbnails, type FetchedThumbnail } from "./thumbnails.js";
 
 // ---------------------------------------------------------------------------
+// Thumbnail data-URI injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Embed base64 data URIs into result objects and strip external thumbnail_url.
+ * Mutates `resultData` in place. Works for both search (list) and detail
+ * (single result) payloads.
+ */
+function injectThumbnailDataUris(
+  resultData: Record<string, unknown>,
+  thumbnails: Map<string, FetchedThumbnail>,
+): void {
+  const results = resultData.results;
+  if (Array.isArray(results)) {
+    for (const item of results) {
+      const aid = item.archive_id as string | undefined;
+      if (aid) {
+        const thumb = thumbnails.get(aid);
+        if (thumb) {
+          item.thumbnail_data_uri = `data:${thumb.mimeType};base64,${thumb.base64}`;
+        }
+      }
+      delete item.thumbnail_url;
+    }
+  } else {
+    const aid = resultData.archive_id as string | undefined;
+    if (aid) {
+      const thumb = thumbnails.get(aid);
+      if (thumb) {
+        resultData.thumbnail_data_uri = `data:${thumb.mimeType};base64,${thumb.base64}`;
+      }
+    }
+    delete resultData.thumbnail_url;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Reusable zod schemas
 // ---------------------------------------------------------------------------
 
@@ -373,13 +410,11 @@ export class SkyFiMCP extends DurableObject<Env> {
           apiKey: this.props!.skyfiApiKey,
         });
 
-        const content: Array<
-          | { type: "text"; text: string }
-          | { type: "image"; data: string; mimeType: string }
-        > = [{ type: "text", text: JSON.stringify(result.data) }];
+        const resultData = result.data as Record<string, unknown>;
+        let thumbnails = new Map<string, FetchedThumbnail>();
 
         if (result.ok && include_thumbnails !== false) {
-          const searchResults = result.data as {
+          const searchResults = resultData as {
             results?: Array<{ archive_id: string; thumbnail_url?: string }>;
           };
           const thumbUrls = (searchResults.results ?? [])
@@ -387,11 +422,23 @@ export class SkyFiMCP extends DurableObject<Env> {
             .map((r) => ({ archiveId: r.archive_id, url: r.thumbnail_url }));
 
           if (thumbUrls.length > 0) {
-            const thumbnails = await fetchThumbnails(thumbUrls);
-            for (const [, thumb] of thumbnails) {
-              content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
-            }
+            thumbnails = await fetchThumbnails(thumbUrls);
           }
+        }
+
+        // Embed data URIs and strip external thumbnail_url from all results
+        if (result.ok) {
+          injectThumbnailDataUris(resultData, thumbnails);
+        }
+
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "image"; data: string; mimeType: string }
+        > = [{ type: "text", text: JSON.stringify(resultData) }];
+
+        // Keep Image content blocks for Claude's vision model
+        for (const [, thumb] of thumbnails) {
+          content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
         }
 
         return { content, isError: !result.ok };
@@ -414,22 +461,32 @@ export class SkyFiMCP extends DurableObject<Env> {
           apiKey: this.props!.skyfiApiKey,
         });
 
-        const content: Array<
-          | { type: "text"; text: string }
-          | { type: "image"; data: string; mimeType: string }
-        > = [{ type: "text", text: JSON.stringify(result.data) }];
+        const resultData = result.data as Record<string, unknown>;
+        let thumbnails = new Map<string, FetchedThumbnail>();
 
         if (result.ok && include_thumbnails !== false) {
-          const details = result.data as { thumbnail_url?: string; archive_id?: string };
+          const details = resultData as { thumbnail_url?: string; archive_id?: string };
           if (details.thumbnail_url && details.archive_id) {
-            const thumbnails = await fetchThumbnails(
+            thumbnails = await fetchThumbnails(
               [{ archiveId: details.archive_id, url: details.thumbnail_url }],
               1,
             );
-            for (const [, thumb] of thumbnails) {
-              content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
-            }
           }
+        }
+
+        // Embed data URI and strip external thumbnail_url
+        if (result.ok) {
+          injectThumbnailDataUris(resultData, thumbnails);
+        }
+
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "image"; data: string; mimeType: string }
+        > = [{ type: "text", text: JSON.stringify(resultData) }];
+
+        // Keep Image content block for Claude's vision model
+        for (const [, thumb] of thumbnails) {
+          content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
         }
 
         return { content, isError: !result.ok };

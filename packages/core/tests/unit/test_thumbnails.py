@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
-from skyfi_mcp.thumbnails import encode_thumbnail_base64, fetch_thumbnails
+from skyfi_mcp.thumbnails import FetchedThumbnail, encode_thumbnail_base64, fetch_thumbnails
 
 # A minimal 1x1 JPEG for testing
 TINY_JPEG = (
@@ -28,7 +28,7 @@ class TestFetchThumbnails:
     @respx.mock
     @pytest.mark.asyncio
     async def test_successful_fetch(self) -> None:
-        """Successful fetch returns archive_id -> bytes mapping."""
+        """Successful fetch returns archive_id -> FetchedThumbnail mapping."""
         respx.get("https://cdn.example.com/thumb1.jpg").mock(
             return_value=httpx.Response(200, content=TINY_JPEG)
         )
@@ -36,7 +36,8 @@ class TestFetchThumbnails:
         result = await fetch_thumbnails([("img-001", "https://cdn.example.com/thumb1.jpg")])
 
         assert "img-001" in result
-        assert result["img-001"] == TINY_JPEG
+        assert result["img-001"].data == TINY_JPEG
+        assert result["img-001"].format == "jpeg"
 
     @respx.mock
     @pytest.mark.asyncio
@@ -55,8 +56,8 @@ class TestFetchThumbnails:
         ])
 
         assert len(result) == 2
-        assert result["img-a"] == b"img-a-bytes"
-        assert result["img-b"] == b"img-b-bytes"
+        assert result["img-a"].data == b"img-a-bytes"
+        assert result["img-b"].data == b"img-b-bytes"
 
     @respx.mock
     @pytest.mark.asyncio
@@ -153,7 +154,8 @@ class TestFetchThumbnails:
             ("c", "https://cdn.example.com/c.jpg"),
         ])
 
-        assert result == {"a": b"a-bytes"}
+        assert len(result) == 1
+        assert result["a"].data == b"a-bytes"
 
 
 class TestEncodeThumbnailBase64:

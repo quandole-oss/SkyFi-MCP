@@ -203,8 +203,8 @@ async def search_archive(
         ]
         if thumb_urls:
             thumbs = await fetch_thumbnails(thumb_urls, max_count=5)
-            for _archive_id, img_bytes in thumbs.items():
-                content.append(Image(data=img_bytes, format="jpeg"))
+            for _archive_id, thumb in thumbs.items():
+                content.append(Image(data=thumb.data, format=thumb.format))
 
     return content
 
@@ -233,8 +233,8 @@ async def get_archive_details(
         thumbs = await fetch_thumbnails(
             [(result.archive_id, result.thumbnail_url)], max_count=1
         )
-        for _archive_id, img_bytes in thumbs.items():
-            content.append(Image(data=img_bytes, format="jpeg"))
+        for _archive_id, thumb in thumbs.items():
+            content.append(Image(data=thumb.data, format=thumb.format))
 
     return content
 

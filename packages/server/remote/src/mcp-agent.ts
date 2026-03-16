@@ -19,7 +19,7 @@ import { z } from "zod";
 
 import type { Env, Props, StoredNotification, WebhookPayload } from "./types.js";
 import { proxyToolCall } from "./proxy.js";
-import { fetchThumbnails } from "./thumbnails.js";
+import { fetchThumbnails, type FetchedThumbnail } from "./thumbnails.js";
 
 // ---------------------------------------------------------------------------
 // Reusable zod schemas
@@ -388,8 +388,8 @@ export class SkyFiMCP extends DurableObject<Env> {
 
           if (thumbUrls.length > 0) {
             const thumbnails = await fetchThumbnails(thumbUrls);
-            for (const [, base64] of thumbnails) {
-              content.push({ type: "image", data: base64, mimeType: "image/jpeg" });
+            for (const [, thumb] of thumbnails) {
+              content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
             }
           }
         }
@@ -426,8 +426,8 @@ export class SkyFiMCP extends DurableObject<Env> {
               [{ archiveId: details.archive_id, url: details.thumbnail_url }],
               1,
             );
-            for (const [, base64] of thumbnails) {
-              content.push({ type: "image", data: base64, mimeType: "image/jpeg" });
+            for (const [, thumb] of thumbnails) {
+              content.push({ type: "image", data: thumb.base64, mimeType: thumb.mimeType });
             }
           }
         }

@@ -155,6 +155,69 @@ def _to_dict(result: Any) -> dict[str, Any]:
     return cast("dict[str, Any]", result)
 
 
+def _wkt_centroid(wkt: str) -> tuple[float, float] | None:
+    """Extract approximate centroid (lat, lon) from a WKT string."""
+    from skyfi_mcp.client.wkt import wkt_to_geojson
+
+    try:
+        geom = wkt_to_geojson(wkt)
+    except (ValueError, IndexError):
+        return None
+
+    coords = geom.get("coordinates", [])
+    if geom["type"] == "Point":
+        return (coords[1], coords[0])
+
+    # Polygon / MultiPolygon — average the outer ring vertices
+    if geom["type"] == "MultiPolygon":
+        flat = coords[0][0]  # first polygon, outer ring
+    elif geom["type"] == "Polygon":
+        flat = coords[0]  # outer ring
+    else:
+        return None
+
+    if not flat:
+        return None
+    lats = [p[1] for p in flat]
+    lons = [p[0] for p in flat]
+    return (sum(lats) / len(lats), sum(lons) / len(lons))
+
+
+async def _resolve_location_name(
+    order: dict[str, Any],
+    osm_client: OSMClient,
+) -> str:
+    """Best-effort location name for an order dict."""
+    # Priority 1: already have a label
+    if order.get("location_name"):
+        return order["location_name"]
+
+    # Priority 2: reverse geocode the AOI centroid
+    aoi_wkt = order.get("metadata", {}).get("aoi", "")
+    if not aoi_wkt:
+        return ""
+
+    centroid = _wkt_centroid(aoi_wkt)
+    if centroid is None:
+        return ""
+
+    try:
+        result = await osm_client.reverse_geocode(centroid[0], centroid[1])
+        d = result.details
+        city = d.get("city") or d.get("town") or d.get("village") or ""
+        state = d.get("state", "")
+        if city and state:
+            return f"{city}, {state}"
+        if city:
+            return city
+        cc = d.get("country_code", "").upper()
+        if state and cc:
+            return f"{state}, {cc}"
+        return state or result.address.split(",")[0].strip() if result.address else ""
+    except Exception:
+        return ""
+
+
 def _inject_thumbnail_data_uris(
     result_dict: dict[str, Any],
     thumbnails: dict[str, Any],
@@ -412,7 +475,10 @@ async def compare_pricing(
     description=(
         "Place an order for an archive image. Requires two-step confirmation: "
         "call first with confirmed=false to preview the price, then with "
-        "confirmed=true to execute the order."
+        "confirmed=true to execute the order. "
+        "When showing the preview, display the thumbnail image, location, "
+        "provider, area, estimated delivery, and price breakdown as a "
+        "checkout summary. Ask the user to confirm before proceeding."
     ),
     annotations=_DESTRUCTIVE,
 )
@@ -421,7 +487,7 @@ async def place_archive_order(
     delivery_options: dict[str, Any] | None = None,
     confirmed: bool = False,
     webhook_url: str | None = None,
-) -> dict[str, Any]:
+) -> list[TextContent | Image] | dict[str, Any]:
     """Place an archive order (requires human confirmation)."""
     input_model = PlaceArchiveOrderInput(
         archive_id=archive_id,
@@ -430,7 +496,40 @@ async def place_archive_order(
         webhook_url=webhook_url,
     )
     result = await order_tools.place_archive_order(_skyfi_client, input_model, _api_key)
-    return _to_dict(result)
+    result_dict = _to_dict(result)
+
+    # For preview: enrich with thumbnail + location
+    if result.preview is not None:
+        archive = await _skyfi_client.get_archive(_api_key, archive_id=archive_id)
+        thumb_urls = archive.get("thumbnailUrls", {})
+        thumb_url = next(iter(thumb_urls.values()), None)
+
+        content: list[TextContent | Image] = []
+
+        if thumb_url:
+            thumbs = await fetch_thumbnails([(archive_id, thumb_url)], max_count=1)
+            thumb = thumbs.get(archive_id)
+            if thumb:
+                mime = f"image/{thumb.format}"
+                b64 = encode_thumbnail_base64(thumb.data)
+                result_dict["preview"]["details"]["thumbnail_data_uri"] = (
+                    f"data:{mime};base64,{b64}"
+                )
+                content.append(Image(data=thumb.data, format=thumb.format))
+
+        # Resolve location from footprint
+        footprint = archive.get("footprint", "")
+        if footprint:
+            loc = await _resolve_location_name(
+                {"metadata": {"aoi": footprint}}, _osm_client
+            )
+            if loc:
+                result_dict["preview"]["details"]["location_name"] = loc
+
+        content.insert(0, TextContent(type="text", text=json.dumps(result_dict)))
+        return content
+
+    return result_dict
 
 
 @mcp.tool(
@@ -439,7 +538,9 @@ async def place_archive_order(
         "Place a tasking order for new satellite imagery capture. "
         "Requires location, capture window, product type, and resolution. "
         "Requires two-step confirmation: call first with confirmed=false "
-        "to review the price, then with confirmed=true to execute."
+        "to review the price, then with confirmed=true to execute. "
+        "When showing the preview, display the location, capture window, "
+        "product details, and price breakdown as a checkout summary."
     ),
     annotations=_DESTRUCTIVE,
 )
@@ -463,7 +564,23 @@ async def place_tasking_order(
         webhook_url=webhook_url,
     )
     result = await order_tools.place_tasking_order(_skyfi_client, input_model, _api_key)
-    return _to_dict(result)
+    result_dict = _to_dict(result)
+
+    # For preview: enrich with location name from input geometry
+    if result.preview is not None:
+        geom = location.get("geometry")
+        if geom:
+            from skyfi_mcp.client.wkt import geojson_to_wkt
+
+            aoi_wkt = geojson_to_wkt(geom)
+            if aoi_wkt:
+                loc = await _resolve_location_name(
+                    {"metadata": {"aoi": aoi_wkt}}, _osm_client
+                )
+                if loc:
+                    result_dict["preview"]["details"]["location_name"] = loc
+
+    return result_dict
 
 
 @mcp.tool(
@@ -481,8 +598,10 @@ async def get_order_status(order_id: str) -> dict[str, Any]:
 @mcp.tool(
     name="list_orders",
     description=(
-        "List your orders, optionally filtered by status and date range. "
-        "Supports pagination."
+        "List your orders with location info and direct links. "
+        "Each order includes order_url — always present order_id as a "
+        "clickable markdown link using order_url. Include the location_name "
+        "column. Do not show a status column."
     ),
     annotations=_READ_ONLY,
 )
@@ -498,7 +617,23 @@ async def list_orders(
         page=page,
     )
     result = await order_tools.list_orders(_skyfi_client, input_model, _api_key)
-    return _to_dict(result)
+    result_dict = _to_dict(result)
+
+    # Resolve location names (best-effort, cap at 3 reverse geocodes for latency)
+    max_geocode = 3
+    geocoded = 0
+    for order in result_dict.get("orders", []):
+        if (
+            not order.get("location_name")
+            and order.get("metadata", {}).get("aoi")
+            and geocoded < max_geocode
+        ):
+            order["location_name"] = await _resolve_location_name(order, _osm_client)
+            geocoded += 1
+        # Remove status from serialized output
+        order.pop("status", None)
+
+    return result_dict
 
 
 @mcp.tool(

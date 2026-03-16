@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import type { Env, Props, StoredNotification, WebhookPayload } from "./types.js";
 import { proxyToolCall } from "./proxy.js";
+import { fetchThumbnails } from "./thumbnails.js";
 
 // ---------------------------------------------------------------------------
 // Reusable zod schemas
@@ -361,9 +362,40 @@ export class SkyFiMCP extends DurableObject<Env> {
           .describe("Maximum cloud cover percentage"),
         open_data: z.boolean().optional().describe("Only free/open-data results"),
         page_token: z.string().optional().describe("Pagination token"),
+        include_thumbnails: z.boolean().default(true).describe("Embed thumbnail images in response"),
       },
       READ_ONLY,
-      async (input) => proxy("search_archive", input),
+      async (input) => {
+        const { include_thumbnails, ...proxyInput } = input;
+        const result = await proxyToolCall(this.env.SKYFI_API_BASE_URL, {
+          toolName: "search_archive",
+          input: proxyInput,
+          apiKey: this.props!.skyfiApiKey,
+        });
+
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "image"; data: string; mimeType: string }
+        > = [{ type: "text", text: JSON.stringify(result.data) }];
+
+        if (result.ok && include_thumbnails !== false) {
+          const searchResults = result.data as {
+            results?: Array<{ archive_id: string; thumbnail_url?: string }>;
+          };
+          const thumbUrls = (searchResults.results ?? [])
+            .filter((r): r is { archive_id: string; thumbnail_url: string } => !!r.thumbnail_url)
+            .map((r) => ({ archiveId: r.archive_id, url: r.thumbnail_url }));
+
+          if (thumbUrls.length > 0) {
+            const thumbnails = await fetchThumbnails(thumbUrls);
+            for (const [, base64] of thumbnails) {
+              content.push({ type: "image", data: base64, mimeType: "image/jpeg" });
+            }
+          }
+        }
+
+        return { content, isError: !result.ok };
+      },
     );
 
     this.server.tool(
@@ -371,9 +403,37 @@ export class SkyFiMCP extends DurableObject<Env> {
       "Get detailed metadata for a specific archive image.",
       {
         archive_id: z.string().describe("Unique archive image identifier"),
+        include_thumbnails: z.boolean().default(true).describe("Embed thumbnail image in response"),
       },
       READ_ONLY,
-      async (input) => proxy("get_archive_details", input),
+      async (input) => {
+        const { include_thumbnails, ...proxyInput } = input;
+        const result = await proxyToolCall(this.env.SKYFI_API_BASE_URL, {
+          toolName: "get_archive_details",
+          input: proxyInput,
+          apiKey: this.props!.skyfiApiKey,
+        });
+
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "image"; data: string; mimeType: string }
+        > = [{ type: "text", text: JSON.stringify(result.data) }];
+
+        if (result.ok && include_thumbnails !== false) {
+          const details = result.data as { thumbnail_url?: string; archive_id?: string };
+          if (details.thumbnail_url && details.archive_id) {
+            const thumbnails = await fetchThumbnails(
+              [{ archiveId: details.archive_id, url: details.thumbnail_url }],
+              1,
+            );
+            for (const [, base64] of thumbnails) {
+              content.push({ type: "image", data: base64, mimeType: "image/jpeg" });
+            }
+          }
+        }
+
+        return { content, isError: !result.ok };
+      },
     );
 
     this.server.tool(

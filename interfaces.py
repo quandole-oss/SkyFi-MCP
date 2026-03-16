@@ -446,6 +446,7 @@ class ArchiveDetailsOutput(BaseModel):
     capture_date: datetime
     cloud_cover: float | None = None
     geometry: GeoJSONGeometry
+    thumbnail_url: str | None = Field(None, description="Preview thumbnail URL.")
     bands: list[str] = Field(default_factory=list, description="Spectral bands available.")
     file_size_mb: float | None = None
     license: str | None = None

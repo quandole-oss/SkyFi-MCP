@@ -183,6 +183,10 @@ async def get_archive_details(
         type="Polygon", coordinates=[]
     )
 
+    # Extract thumbnail URL (same pattern as _parse_archive)
+    thumb_urls = raw.get("thumbnailUrls", {})
+    thumbnail_url = next(iter(thumb_urls.values()), None) if thumb_urls else None
+
     return ArchiveDetailsOutput(
         archive_id=raw["archiveId"],
         provider=raw.get("provider", "unknown"),
@@ -191,6 +195,7 @@ async def get_archive_details(
         capture_date=raw.get("captureTimestamp", raw.get("captureDate", "")),
         cloud_cover=raw.get("cloudCoveragePercent"),
         geometry=geom,
+        thumbnail_url=thumbnail_url,
         bands=raw.get("bands", []),
         file_size_mb=raw.get("fileSizeMb"),
         license=raw.get("license"),

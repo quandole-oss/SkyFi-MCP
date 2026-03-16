@@ -219,6 +219,27 @@ class TestGetArchiveDetails:
         assert result.archive_id == "img-001"
         assert result.sensor_type == SensorType.MULTISPECTRAL
         assert result.resolution == 0.3
+        assert result.thumbnail_url == "https://example.com/thumb.png"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_thumbnail_url_missing(self, client: SkyFiClient):
+        """thumbnail_url should be None when API omits thumbnailUrls."""
+        respx.get(f"{BASE_URL}/archives/img-002").mock(
+            return_value=httpx.Response(
+                200,
+                json=_archive_item(
+                    archiveId="img-002",
+                    thumbnailUrls={},
+                ),
+            )
+        )
+
+        inp = GetArchiveDetailsInput(archive_id="img-002")
+        result = await search.get_archive_details(client, inp, API_KEY)
+
+        assert result.archive_id == "img-002"
+        assert result.thumbnail_url is None
 
 
 class TestExploreProviders:

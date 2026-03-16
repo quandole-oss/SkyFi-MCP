@@ -10,13 +10,16 @@ Agent A's typed tool functions that expect (client, input_model, api_key).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, cast
 
 from fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from fastmcp.utilities.types import Image
+from mcp.types import TextContent, ToolAnnotations
 from skyfi_mcp.client.osm import OSMClient
 from skyfi_mcp.client.skyfi import SkyFiClient
+from skyfi_mcp.thumbnails import fetch_thumbnails
 from skyfi_mcp.tools import geo as geo_tools
 from skyfi_mcp.tools import monitoring as monitoring_tools
 from skyfi_mcp.tools import orders as order_tools
@@ -174,7 +177,8 @@ async def search_archive(
     cloud_cover_max: float | None = None,
     open_data: bool | None = None,
     page_token: str | None = None,
-) -> dict[str, Any]:
+    include_thumbnails: bool = True,
+) -> list[TextContent | Image]:
     """Search the SkyFi archive for satellite imagery."""
     input_model = SearchArchiveInput(
         location=_build_location(location),
@@ -186,7 +190,23 @@ async def search_archive(
         page_token=page_token,
     )
     result = await search_tools.search_archive(_skyfi_client, input_model, _api_key)
-    return _to_dict(result)
+
+    content: list[TextContent | Image] = [
+        TextContent(type="text", text=json.dumps(_to_dict(result)))
+    ]
+
+    if include_thumbnails:
+        thumb_urls = [
+            (r.archive_id, r.thumbnail_url)
+            for r in result.results
+            if r.thumbnail_url
+        ]
+        if thumb_urls:
+            thumbs = await fetch_thumbnails(thumb_urls, max_count=5)
+            for _archive_id, img_bytes in thumbs.items():
+                content.append(Image(data=img_bytes, format="jpeg"))
+
+    return content
 
 
 @mcp.tool(
@@ -197,11 +217,26 @@ async def search_archive(
     ),
     annotations=_READ_ONLY,
 )
-async def get_archive_details(archive_id: str) -> dict[str, Any]:
+async def get_archive_details(
+    archive_id: str,
+    include_thumbnails: bool = True,
+) -> list[TextContent | Image]:
     """Retrieve full details for a single archive image."""
     input_model = GetArchiveDetailsInput(archive_id=archive_id)
     result = await search_tools.get_archive_details(_skyfi_client, input_model, _api_key)
-    return _to_dict(result)
+
+    content: list[TextContent | Image] = [
+        TextContent(type="text", text=json.dumps(_to_dict(result)))
+    ]
+
+    if include_thumbnails and result.thumbnail_url:
+        thumbs = await fetch_thumbnails(
+            [(result.archive_id, result.thumbnail_url)], max_count=1
+        )
+        for _archive_id, img_bytes in thumbs.items():
+            content.append(Image(data=img_bytes, format="jpeg"))
+
+    return content
 
 
 @mcp.tool(

@@ -14,9 +14,10 @@
  */
 
 import type { Env, Props, WebhookPayload } from "./types.js";
-import { extractProps, handleTokenRequest } from "./auth.js";
-// validateToken is also exported from auth.ts for middleware use
+import { extractProps, handleTokenRequest, validateToken } from "./auth.js";
 import { rateLimitResponse } from "./rate-limit.js";
+import { handleApiRequest } from "./api.js";
+import { UI_HTML } from "./ui.js";
 
 // Re-export the Durable Object class so the runtime can find it.
 export { SkyFiMCP } from "./mcp-agent.js";
@@ -392,6 +393,40 @@ export default {
       return withCors(await handleWebhook(request, env));
     }
 
+    // --- Dashboard UI ---
+
+    if (path === "/ui" || path === "/ui/") {
+      return withCors(
+        new Response(UI_HTML, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }),
+      );
+    }
+
+    // --- REST API routes (JWT auth required) ---
+
+    if (path.startsWith("/api/")) {
+      const claims = await validateToken(request, env);
+      if (!claims) {
+        return withCors(
+          new Response(
+            JSON.stringify({ error: "unauthorized", message: "Valid JWT required" }),
+            { status: 401, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+
+      const userHash = await sha256Hex(claims.skyfiApiKey);
+      const rlResult = checkInMemoryRateLimit(userHash);
+      if (!rlResult.allowed) {
+        return withCors(rateLimitResponse(rlResult.retryAfterSeconds));
+      }
+
+      const response = await handleApiRequest(request, env.SKYFI_API_BASE_URL, path, claims.skyfiApiKey);
+      return withCors(response);
+    }
+
     // --- MCP routes (auth required) ---
 
     if (path === "/mcp" || path === "/mcp/" || path === "/sse" || path === "/sse/") {
@@ -428,7 +463,7 @@ export default {
         JSON.stringify({
           error: "not_found",
           message: `No handler for ${path}`,
-          available_routes: ["/health", "/token", "/webhook", "/mcp", "/sse"],
+          available_routes: ["/health", "/token", "/webhook", "/ui", "/api/*", "/mcp", "/sse"],
         }),
         { status: 404, headers: { "Content-Type": "application/json" } },
       ),

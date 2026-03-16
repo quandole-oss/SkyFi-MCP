@@ -21,7 +21,7 @@ import type { Env, JWTPayload, Props } from "./types.js";
 const TOKEN_EXPIRY_SECONDS = 3600;
 
 /** SkyFi API endpoint used to validate an API key. */
-const SKYFI_VALIDATE_PATH = "/v1/user/profile";
+const SKYFI_VALIDATE_PATH = "/auth/whoami";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,7 +174,7 @@ async function validateSkyFiApiKey(
     const response = await fetch(`${baseUrl}${SKYFI_VALIDATE_PATH}`, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "X-Skyfi-Api-Key": apiKey,
         Accept: "application/json",
       },
     });

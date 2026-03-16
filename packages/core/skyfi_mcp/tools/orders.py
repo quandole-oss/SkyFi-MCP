@@ -225,8 +225,10 @@ async def get_order_status(
 
     api_status = raw.get("status", raw.get("deliveryStatus", "CREATED"))
 
+    oid = raw.get("orderId", raw.get("id", input.order_id))
     return OrderStatusOutput(
-        order_id=raw.get("orderId", raw.get("id", input.order_id)),
+        order_id=oid,
+        order_url=f"https://app.skyfi.com/orders/{oid}",
         status=_map_order_status(api_status),
         created_at=raw.get("createdAt") or raw.get("created_at") or None,
         updated_at=raw.get("updatedAt") or raw.get("lastModified") or raw.get("createdAt") or None,
@@ -267,9 +269,11 @@ async def list_orders(
                 total=float(item["customerItemCost"]),
                 currency="USD",
             )
+        oid = item.get("orderId", item.get("id", ""))
         orders.append(
             OrderStatusOutput(
-                order_id=item.get("orderId", item.get("id", "")),
+                order_id=oid,
+                order_url=f"https://app.skyfi.com/orders/{oid}",
                 status=_map_order_status(api_status),
                 created_at=item.get("createdAt") or item.get("created_at") or None,
                 updated_at=item.get("updatedAt") or item.get("lastModified") or None,

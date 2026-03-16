@@ -875,3 +875,5 @@ class TestConfirmationHelpers:
         assert result.confirmation is not None
         assert result.preview is None
         assert result.confirmation.order_id == "ord-001"
+        assert result.confirmation.order_url == "https://app.skyfi.com/orders/ord-001"
+        assert "https://app.skyfi.com/orders/ord-001" in result.confirmation.message

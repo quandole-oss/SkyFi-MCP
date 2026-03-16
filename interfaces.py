@@ -561,6 +561,10 @@ class OrderConfirmation(BaseModel):
     """Returned when confirmed=true and order is placed successfully."""
 
     order_id: str
+    order_url: str = Field(
+        ...,
+        description="Direct link to the order on SkyFi (e.g. https://app.skyfi.com/orders/{id}).",
+    )
     status: OrderStatus
     price: PriceBreakdown
     estimated_delivery: str | None = None
@@ -584,6 +588,10 @@ class OrderStatusOutput(BaseModel):
     """Output for get_order_status tool."""
 
     order_id: str
+    order_url: str = Field(
+        "",
+        description="Direct link to the order on SkyFi (e.g. https://app.skyfi.com/orders/{id}).",
+    )
     status: OrderStatus
     created_at: datetime | None = None
     updated_at: datetime | None = None

@@ -82,12 +82,14 @@ def build_order_confirmation(
     estimated_delivery: str | None = None,
 ) -> PlaceOrderOutput:
     """Build a confirmation response after a successful order placement."""
+    order_url = f"https://app.skyfi.com/orders/{order_id}"
     confirmation = OrderConfirmation(
         order_id=order_id,
+        order_url=order_url,
         status=OrderStatus.CONFIRMED,
         price=price,
         estimated_delivery=estimated_delivery,
-        message=f"Order {order_id} placed successfully.",
+        message=f"Order {order_id} placed successfully. View it at {order_url}",
     )
     return PlaceOrderOutput(preview=None, confirmation=confirmation)
 

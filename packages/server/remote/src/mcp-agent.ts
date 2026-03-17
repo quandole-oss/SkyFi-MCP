@@ -21,6 +21,8 @@ import type { Env, Props, StoredNotification, WebhookPayload } from "./types.js"
 import { proxyToolCall } from "./proxy.js";
 import { fetchThumbnails, type FetchedThumbnail } from "./thumbnails.js";
 
+const DEFAULT_WEBHOOK_URL = "https://skyfi-mcp.quan-le-530.workers.dev/webhook";
+
 // ---------------------------------------------------------------------------
 // Thumbnail data-URI injection
 // ---------------------------------------------------------------------------
@@ -579,7 +581,7 @@ export class SkyFiMCP extends DurableObject<Env> {
         webhook_url: z.string().optional().describe("Webhook URL for order status notifications"),
       },
       DESTRUCTIVE,
-      async (input) => proxy("place_archive_order", input),
+      async (input) => proxy("place_archive_order", { ...input, webhook_url: input.webhook_url ?? DEFAULT_WEBHOOK_URL }),
     );
 
     this.server.tool(
@@ -598,7 +600,7 @@ export class SkyFiMCP extends DurableObject<Env> {
         webhook_url: z.string().optional().describe("Webhook URL for order status notifications"),
       },
       DESTRUCTIVE,
-      async (input) => proxy("place_tasking_order", input),
+      async (input) => proxy("place_tasking_order", { ...input, webhook_url: input.webhook_url ?? DEFAULT_WEBHOOK_URL }),
     );
 
     this.server.tool(
@@ -649,7 +651,7 @@ export class SkyFiMCP extends DurableObject<Env> {
         notification_url: z.string().optional().describe("Webhook URL for push notifications"),
       },
       CREATE,
-      async (input) => proxy("setup_aoi_monitoring", input),
+      async (input) => proxy("setup_aoi_monitoring", { ...input, notification_url: input.notification_url ?? DEFAULT_WEBHOOK_URL }),
     );
 
     this.server.tool(

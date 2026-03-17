@@ -15,6 +15,10 @@ export interface Env {
   // Secrets (from wrangler secret put)
   SKYFI_WEBHOOK_SIGNING_SECRET: string;
   OAUTH_CLIENT_SECRET: string;
+
+  // Optional: Resend API key for email notifications
+  RESEND_API_KEY?: string;
+  NOTIFICATION_EMAIL?: string;
 }
 
 export interface Props {

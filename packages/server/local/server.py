@@ -108,6 +108,8 @@ _api_key: str = _config.api_key
 _skyfi_client = SkyFiClient(base_url=_config.api_base_url, auth_header=_config.auth_header)
 _osm_client = OSMClient()
 
+_DEFAULT_WEBHOOK_URL = "https://skyfi-mcp.quan-le-530.workers.dev/webhook"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -521,6 +523,8 @@ async def place_archive_order(
     webhook_url: str | None = None,
 ) -> list[TextContent | Image] | dict[str, Any]:
     """Place an archive order (requires human confirmation)."""
+    if webhook_url is None:
+        webhook_url = _DEFAULT_WEBHOOK_URL
     input_model = PlaceArchiveOrderInput(
         archive_id=archive_id,
         delivery_options=_build_delivery_options(delivery_options),
@@ -621,6 +625,8 @@ async def place_tasking_order(
     webhook_url: str | None = None,
 ) -> list[TextContent | Image] | dict[str, Any]:
     """Place a tasking order (requires human confirmation)."""
+    if webhook_url is None:
+        webhook_url = _DEFAULT_WEBHOOK_URL
     input_model = PlaceTaskingOrderInput(
         location=_build_location(location),
         window_start=datetime.fromisoformat(window_start),
@@ -756,6 +762,8 @@ async def setup_aoi_monitoring(
     notification_url: str | None = None,
 ) -> dict[str, Any]:
     """Set up AOI monitoring for new imagery."""
+    if notification_url is None:
+        notification_url = _DEFAULT_WEBHOOK_URL
     input_model = SetupAOIMonitoringInput(
         location=_build_location(location),
         resolution_min=resolution_min,

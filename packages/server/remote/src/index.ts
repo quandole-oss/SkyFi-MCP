@@ -146,6 +146,48 @@ async function verifyWebhookSignature(
 }
 
 // ---------------------------------------------------------------------------
+// Email notification via Resend
+// ---------------------------------------------------------------------------
+
+async function sendEmailNotification(
+  env: Env,
+  payload: WebhookPayload,
+): Promise<void> {
+  if (!env.RESEND_API_KEY) return;
+
+  const to = env.NOTIFICATION_EMAIL || "quan.le@challenger.gauntletai.com";
+  const eventType = payload.event_type || "notification";
+  const data = payload.data || {};
+
+  const subject = `SkyFi: ${eventType.replace(/_/g, " ")}`;
+  const details = Object.entries(data)
+    .map(([k, v]) => `<li><strong>${k}:</strong> ${String(v)}</li>`)
+    .join("");
+
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "SkyFi MCP <onboarding@resend.dev>",
+        to: [to],
+        subject,
+        html: `<h2>SkyFi Notification</h2>
+<p><strong>Event:</strong> ${eventType}</p>
+${payload.monitor_id ? `<p><strong>Monitor:</strong> ${payload.monitor_id}</p>` : ""}
+<ul>${details}</ul>
+<hr><p style="color:#888;font-size:12px">Sent by SkyFi MCP Worker</p>`,
+      }),
+    });
+  } catch {
+    // Email is best-effort — don't fail the webhook
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Webhook handler (HMAC-verified, dispatches to user's DO)
 // ---------------------------------------------------------------------------
 
@@ -222,6 +264,9 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
       { status: 502, headers: { "Content-Type": "application/json" } },
     );
   }
+
+  // Best-effort email notification
+  await sendEmailNotification(env, payload);
 
   return new Response(
     JSON.stringify({ received: true }),

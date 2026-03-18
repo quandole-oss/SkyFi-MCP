@@ -69,16 +69,22 @@ async def fetch_thumbnails(
             resp = await client.get(url, timeout=timeout_seconds)
             resp.raise_for_status()
             if len(resp.content) > max_bytes:
-                logger.debug(
+                logger.warning(
                     "Thumbnail for %s too large (%d bytes), skipping",
                     archive_id,
                     len(resp.content),
                 )
                 return None
             fmt = detect_image_format(resp.content)
+            logger.info(
+                "Fetched thumbnail for %s: %d bytes, %s",
+                archive_id,
+                len(resp.content),
+                fmt,
+            )
             return (archive_id, FetchedThumbnail(data=resp.content, format=fmt))
         except (httpx.HTTPError, httpx.TimeoutException):
-            logger.debug("Failed to fetch thumbnail for %s: %s", archive_id, url)
+            logger.warning("Failed to fetch thumbnail for %s: %s", archive_id, url)
             return None
 
     async with httpx.AsyncClient() as client:

@@ -132,7 +132,8 @@ async def fetch_static_map(
             loop.run_in_executor(None, _render_map_sync, ring, width, height),
             timeout=timeout_seconds,
         )
+        logger.info("Static map rendered: %d bytes", len(png_bytes))
         return FetchedThumbnail(data=png_bytes, format="png")
     except Exception:
-        logger.debug("Failed to render static map", exc_info=True)
+        logger.warning("Failed to render static map", exc_info=True)
         return None

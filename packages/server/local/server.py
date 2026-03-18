@@ -449,7 +449,7 @@ async def place_archive_order(
     result = await order_tools.place_archive_order(_skyfi_client, input_model, _api_key)
     result_dict = _to_dict(result)
 
-    # For preview: enrich with location name + map link
+    # For preview: enrich with location name and map link
     if result.preview is not None:
         archive = await _skyfi_client.get_archive(_api_key, archive_id=archive_id)
         footprint = archive.get("footprint", "")
@@ -508,7 +508,7 @@ async def place_tasking_order(
     result = await order_tools.place_tasking_order(_skyfi_client, input_model, _api_key)
     result_dict = _to_dict(result)
 
-    # For preview: enrich with location name + map link
+    # For preview: enrich with location name and map link
     if result.preview is not None:
         geom = location.get("geometry")
         if geom:

@@ -60,6 +60,8 @@ def _render_map_sync(
     ring: list[list[float]],
     width: int,
     height: int,
+    output_format: str = "png",
+    jpeg_quality: int = 60,
 ) -> bytes:
     """Synchronous render — meant to run in an executor."""
     from staticmap import Polygon, StaticMap
@@ -101,7 +103,11 @@ def _render_map_sync(
         sys.stdout = old_stdout
 
     buf = io.BytesIO()
-    image.save(buf, format="PNG")
+    if output_format == "jpeg":
+        image = image.convert("RGB")
+        image.save(buf, format="JPEG", quality=jpeg_quality)
+    else:
+        image.save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -110,6 +116,8 @@ async def fetch_static_map(
     width: int = 600,
     height: int = 400,
     timeout_seconds: float = 8.0,
+    output_format: str = "png",
+    jpeg_quality: int = 60,
 ) -> FetchedThumbnail | None:
     """Render a static map image from a GeoJSON geometry dict.
 
@@ -118,9 +126,11 @@ async def fetch_static_map(
         width: Image width in pixels.
         height: Image height in pixels.
         timeout_seconds: Maximum time for rendering.
+        output_format: ``"png"`` or ``"jpeg"``.
+        jpeg_quality: JPEG quality (1-100), only used when *output_format* is ``"jpeg"``.
 
     Returns:
-        FetchedThumbnail with PNG bytes, or None on any failure.
+        FetchedThumbnail with image bytes, or None on any failure.
     """
     try:
         ring = _extract_outer_ring(geometry)
@@ -128,12 +138,23 @@ async def fetch_static_map(
             return None
 
         loop = asyncio.get_running_loop()
-        png_bytes = await asyncio.wait_for(
-            loop.run_in_executor(None, _render_map_sync, ring, width, height),
+        import functools
+
+        render_fn = functools.partial(
+            _render_map_sync,
+            ring,
+            width,
+            height,
+            output_format=output_format,
+            jpeg_quality=jpeg_quality,
+        )
+        img_bytes = await asyncio.wait_for(
+            loop.run_in_executor(None, render_fn),
             timeout=timeout_seconds,
         )
-        logger.info("Static map rendered: %d bytes", len(png_bytes))
-        return FetchedThumbnail(data=png_bytes, format="png")
+        fmt = "jpeg" if output_format == "jpeg" else "png"
+        logger.info("Static map rendered: %d bytes (%s)", len(img_bytes), fmt)
+        return FetchedThumbnail(data=img_bytes, format=fmt)
     except Exception:
         logger.warning("Failed to render static map", exc_info=True)
         return None
